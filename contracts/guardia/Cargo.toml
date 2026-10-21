@@ -1,0 +1,20 @@
+[package]
+name = "guardia"
+version = "0.1.0"
+edition = "2021"
+authors = ["Daveboycyber"]
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+near-sdk = "5.5.0"
+
+[profile.release]
+codesgen-units = 1
+opt-level = "s"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
