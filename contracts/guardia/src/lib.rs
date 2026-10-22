@@ -179,8 +179,11 @@ impl Contract {
     }
 
     /// Get the full policy for an agent
-    pub fn get_policy(&self, agent_id: AccountId) -> Option<Policy> {
-        self.agents.get(&agent_id).cloned()
+    /// Returns (max_single_transfer, max_daily_volume, is_frozen) or None if not registered
+    pub fn get_policy(&self, agent_id: AccountId) -> Option<(u128, u128, bool)> {
+        self.agents.get(&agent_id).map(|p| {
+            (p.max_single_transfer, p.max_daily_volume, p.is_frozen)
+        })
     }
 
     /// Check whether a proposed transfer would currently be allowed
