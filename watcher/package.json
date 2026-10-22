@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "demo": "tsx src/index.ts --demo",
-    "watch": "tsx src/index.ts"
+    "live": "tsx src/index.ts --live",
+    "watch": "tsx src/index.ts --live"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

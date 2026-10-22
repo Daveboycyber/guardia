@@ -17,7 +17,7 @@ function runDemo() {
   const policies = new Map<string, Policy>();
   policies.set("agent.testnet", { ...DEFAULT_POLICY });
 
-  console.log("Guardia demo \u2014 local policy mirror (no chain required)\n");
+  console.log("Guardia demo — local policy mirror (no chain required)\n");
   for (const tx of DEMO) {
     const policy = policies.get(tx.agent) ?? DEFAULT_POLICY;
     const decision = checkTransfer(policies.has(tx.agent), policy, nearToYocto(tx.amountNear));
@@ -37,30 +37,26 @@ function runDemo() {
 }
 
 async function watchLive() {
-  const contractId = process.env.GUARDIA_CONTRACT;
-  const agentId = process.env.GUARDIA_AGENT;
-  const amount = process.env.GUARDIA_AMOUNT ?? "1000000000000000000000000";
-  if (!contractId || !agentId) {
-    console.error("Set GUARDIA_CONTRACT and GUARDIA_AGENT (testnet account ids).");
-    console.error("Or run: npm run demo");
-    process.exit(1);
-  }
+  const contractId = process.env.GUARDIA_CONTRACT ?? "skar.testnet";
+  const agentId = process.env.GUARDIA_AGENT ?? "agent.skar.testnet";
+  const near = Number(process.env.GUARDIA_NEAR ?? "1");
+  const amount = (BigInt(near) * ONE_NEAR).toString();
 
   const decision = await viewCall<[boolean, string]>(contractId, "check_transfer", {
     agent_id: agentId,
     amount,
   });
-  console.log(decision[0] ? "ALLOW" : "BLOCK", decision[1]);
+  console.log(
+    `${decision[0] ? "ALLOW" : "BLOCK"}  ${near} NEAR  ${agentId} on ${contractId}`,
+  );
+  console.log(`       ${decision[1]}`);
 }
 
-const demo = process.argv.includes("--demo") || !process.env.GUARDIA_CONTRACT;
-if (demo && !process.env.GUARDIA_CONTRACT) {
-  runDemo();
-} else if (process.argv.includes("--demo")) {
-  runDemo();
-} else {
+if (process.argv.includes("--live")) {
   watchLive().catch((err) => {
     console.error(err);
     process.exit(1);
   });
+} else {
+  runDemo();
 }
