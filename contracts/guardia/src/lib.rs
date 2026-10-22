@@ -22,9 +22,9 @@ impl Default for Policy {
     fn default() -> Self {
         Self {
             // 10 NEAR
-            max_single_transfer: 10_000_000_000_000_000_000_000,
+            max_single_transfer: 10_000_000_000_000_000_000_000_000,
             // 50 NEAR
-            max_daily_volume: 50_000_000_000_000_000_000_000,
+            max_daily_volume: 50_000_000_000_000_000_000_000_000,
             is_frozen: false,
         }
     }
