@@ -3,12 +3,14 @@ use near_sdk::{
     collections::LookupMap,
     env, near, require, AccountId, PanicOnDefault,
     serde::{Deserialize, Serialize},
+    schemars::JsonSchema,
 };
 
 /// Basic policy parameters for a protected agent
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, JsonSchema)]
 #[borsh(crate = "near_sdk::borsh")]
 #[serde(crate = "near_sdk::serde")]
+#[schemars(crate = "near_sdk::schemars")]
 pub struct Policy {
     /// Maximum amount (in yoctoNEAR) allowed in a single transfer
     pub max_single_transfer: u128,
