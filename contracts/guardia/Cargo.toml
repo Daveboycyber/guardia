@@ -9,7 +9,7 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-near-sdk = { version = "5.5.0", features = ["abi"] }
+near-sdk = "5.5.0"
 
 [profile.release]
 codegen-units = 1
