@@ -74,8 +74,6 @@ impl Contract {
         }
     }
 
-    // ─── Owner-only management ────────────────────────────────
-
     /// Register a new agent under protection
     pub fn register_agent(&mut self, agent_id: AccountId) {
         self.assert_owner();
@@ -168,8 +166,6 @@ impl Contract {
         env::log_str(&format!("Updated policy for agent: {}", agent_id));
     }
 
-    // ─── View methods ───────────────────────────────────────
-
     /// Check if an agent is currently frozen
     pub fn is_frozen(&self, agent_id: AccountId) -> bool {
         self.agents
@@ -188,11 +184,7 @@ impl Contract {
 
     /// Check whether a proposed transfer would currently be allowed
     /// Returns (allowed: bool, reason: String)
-    pub fn check_transfer(
-        &self,
-        agent_id: AccountId,
-        amount: u128,
-    ) -> (bool, String) {
+    pub fn check_transfer(&self, agent_id: AccountId, amount: u128) -> (bool, String) {
         let Some(policy) = self.agents.get(&agent_id) else {
             return (false, "Agent not registered".to_string());
         };
@@ -211,18 +203,101 @@ impl Contract {
             );
         }
 
-        // Note: real daily volume tracking will be added later (needs timestamps)
-        // For MVP we only enforce single-transfer + frozen flag
-
         (true, "Allowed".to_string())
     }
-
-    // ─── Internal helpers ───────────────────────────────────
 
     fn assert_owner(&self) {
         require!(
             env::predecessor_account_id() == self.owner_id,
             "Only owner can call this method"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use near_sdk::test_utils::VMContextBuilder;
+    use near_sdk::testing_env;
+
+    const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
+
+    fn owner() -> AccountId {
+        "owner.testnet".parse().unwrap()
+    }
+
+    fn agent() -> AccountId {
+        "agent.testnet".parse().unwrap()
+    }
+
+    fn set_predecessor(predecessor: AccountId) {
+        let mut builder = VMContextBuilder::new();
+        builder
+            .current_account_id("guardia.testnet".parse().unwrap())
+            .predecessor_account_id(predecessor);
+        testing_env!(builder.build());
+    }
+
+    fn setup() -> Contract {
+        set_predecessor(owner());
+        let mut contract = Contract::new(owner());
+        contract.register_agent(agent());
+        contract
+    }
+
+    #[test]
+    fn owner_can_register_and_read_default_policy() {
+        let contract = setup();
+        let policy = contract.get_policy(agent()).expect("registered");
+        assert_eq!(policy.0, 10 * ONE_NEAR);
+        assert_eq!(policy.1, 50 * ONE_NEAR);
+        assert!(!policy.2);
+        assert!(!contract.is_frozen(agent()));
+    }
+
+    #[test]
+    #[should_panic(expected = "Only owner can call this method")]
+    fn non_owner_cannot_register() {
+        set_predecessor(owner());
+        let mut contract = Contract::new(owner());
+        set_predecessor("stranger.testnet".parse().unwrap());
+        contract.register_agent(agent());
+    }
+
+    #[test]
+    fn check_transfer_allows_under_limit_and_blocks_over() {
+        let contract = setup();
+        let (ok, reason) = contract.check_transfer(agent(), ONE_NEAR);
+        assert!(ok, "{reason}");
+
+        let (ok, reason) = contract.check_transfer(agent(), 11 * ONE_NEAR);
+        assert!(!ok);
+        assert!(reason.contains("exceeds"));
+    }
+
+    #[test]
+    fn freeze_blocks_even_small_transfers() {
+        let mut contract = setup();
+        set_predecessor(owner());
+        contract.freeze_agent(agent());
+        assert!(contract.is_frozen(agent()));
+
+        let (ok, reason) = contract.check_transfer(agent(), ONE_NEAR);
+        assert!(!ok);
+        assert_eq!(reason, "Agent is frozen");
+
+        set_predecessor(owner());
+        contract.unfreeze_agent(agent());
+        let (ok, _) = contract.check_transfer(agent(), ONE_NEAR);
+        assert!(ok);
+    }
+
+    #[test]
+    fn unknown_agent_is_rejected() {
+        set_predecessor(owner());
+        let contract = Contract::new(owner());
+        let (ok, reason) = contract.check_transfer(agent(), ONE_NEAR);
+        assert!(!ok);
+        assert_eq!(reason, "Agent not registered");
     }
 }
