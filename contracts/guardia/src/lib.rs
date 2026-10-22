@@ -1,9 +1,9 @@
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    collections::LookupMap,
     env, near, require, AccountId, PanicOnDefault,
     serde::{Deserialize, Serialize},
     schemars::JsonSchema,
+    store::LookupMap,
 };
 
 /// Basic policy parameters for a protected agent
@@ -35,17 +35,21 @@ impl Default for Policy {
 /// Events (NEP-297 style) for the watcher and indexers
 #[near(event_json(standard = "guardia"))]
 pub enum Event {
+    #[event_version("1.0.0")]
     AgentRegistered {
         agent_id: AccountId,
     },
+    #[event_version("1.0.0")]
     AgentFrozen {
         agent_id: AccountId,
         by: AccountId,
     },
+    #[event_version("1.0.0")]
     AgentUnfrozen {
         agent_id: AccountId,
         by: AccountId,
     },
+    #[event_version("1.0.0")]
     PolicyUpdated {
         agent_id: AccountId,
         by: AccountId,
@@ -82,7 +86,7 @@ impl Contract {
             "Agent already registered"
         );
 
-        self.agents.insert(&agent_id, &Policy::default());
+        self.agents.insert(agent_id.clone(), Policy::default());
 
         Event::AgentRegistered {
             agent_id: agent_id.clone(),
@@ -98,10 +102,11 @@ impl Contract {
         let mut policy = self
             .agents
             .get(&agent_id)
-            .expect("Agent not registered");
+            .expect("Agent not registered")
+            .clone();
 
         policy.is_frozen = true;
-        self.agents.insert(&agent_id, &policy);
+        self.agents.insert(agent_id.clone(), policy);
 
         Event::AgentFrozen {
             agent_id: agent_id.clone(),
@@ -118,10 +123,11 @@ impl Contract {
         let mut policy = self
             .agents
             .get(&agent_id)
-            .expect("Agent not registered");
+            .expect("Agent not registered")
+            .clone();
 
         policy.is_frozen = false;
-        self.agents.insert(&agent_id, &policy);
+        self.agents.insert(agent_id.clone(), policy);
 
         Event::AgentUnfrozen {
             agent_id: agent_id.clone(),
@@ -143,7 +149,8 @@ impl Contract {
         let mut policy = self
             .agents
             .get(&agent_id)
-            .expect("Agent not registered");
+            .expect("Agent not registered")
+            .clone();
 
         if let Some(v) = max_single_transfer {
             policy.max_single_transfer = v;
@@ -152,7 +159,7 @@ impl Contract {
             policy.max_daily_volume = v;
         }
 
-        self.agents.insert(&agent_id, &policy);
+        self.agents.insert(agent_id.clone(), policy);
 
         Event::PolicyUpdated {
             agent_id: agent_id.clone(),
@@ -175,7 +182,7 @@ impl Contract {
 
     /// Get the full policy for an agent
     pub fn get_policy(&self, agent_id: AccountId) -> Option<Policy> {
-        self.agents.get(&agent_id)
+        self.agents.get(&agent_id).cloned()
     }
 
     /// Check whether a proposed transfer would currently be allowed
