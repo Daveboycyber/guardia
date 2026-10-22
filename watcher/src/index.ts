@@ -1,5 +1,5 @@
 import { checkTransfer, DEFAULT_POLICY, ONE_NEAR, type Policy } from "./policy.ts";
-import { viewCall } from "./near.ts";
+import { changeCall, viewCall } from "./near.ts";
 
 type Proposed = { agent: string; amountNear: number; label: string };
 
@@ -36,20 +36,70 @@ function runDemo() {
   console.log(`       ${after.reason}`);
 }
 
+function shouldAutoFreeze(reason: string): boolean {
+  // Only freeze on policy violations we can remediate, not on missing registration
+  // or if already frozen.
+  if (reason === "Agent is frozen") return false;
+  if (reason === "Agent not registered") return false;
+  return reason.includes("exceeds") || reason.toLowerCase().includes("policy");
+}
+
 async function watchLive() {
   const contractId = process.env.GUARDIA_CONTRACT ?? "skar.testnet";
   const agentId = process.env.GUARDIA_AGENT ?? "agent.skar.testnet";
-  const near = Number(process.env.GUARDIA_NEAR ?? "1");
-  const amount = (BigInt(near) * ONE_NEAR).toString();
+  const ownerId = process.env.GUARDIA_OWNER ?? "skar.testnet";
+  const privateKey = process.env.GUARDIA_PRIVATE_KEY;
+  const autoFreeze = process.env.GUARDIA_AUTO_FREEZE !== "0";
+
+  const nearEnv = process.env.GUARDIA_NEAR;
+  const amountEnv = process.env.GUARDIA_AMOUNT;
+  const near = nearEnv ? Number(nearEnv) : amountEnv ? null : 1;
+  const amount =
+    amountEnv ??
+    (near !== null ? (BigInt(near) * ONE_NEAR).toString() : "1000000000000000000000000");
+  const nearLabel = near !== null ? `${near} NEAR` : `${amount} yocto`;
 
   const decision = await viewCall<[boolean, string]>(contractId, "check_transfer", {
     agent_id: agentId,
     amount,
   });
-  console.log(
-    `${decision[0] ? "ALLOW" : "BLOCK"}  ${near} NEAR  ${agentId} on ${contractId}`,
-  );
-  console.log(`       ${decision[1]}`);
+  const allowed = decision[0];
+  const reason = decision[1];
+
+  console.log(`${allowed ? "ALLOW" : "BLOCK"}  ${nearLabel}  ${agentId} on ${contractId}`);
+  console.log(`       ${reason}`);
+
+  if (allowed || !autoFreeze || !shouldAutoFreeze(reason)) {
+    return;
+  }
+
+  if (!privateKey) {
+    console.log(
+      "\nSKIP FREEZE  set GUARDIA_PRIVATE_KEY (owner full-access key) to auto-freeze",
+    );
+    return;
+  }
+
+  console.log(`\nFREEZE  calling freeze_agent as ${ownerId}...`);
+  try {
+    const hash = await changeCall(
+      contractId,
+      "freeze_agent",
+      { agent_id: agentId },
+      { ownerId, privateKey },
+    );
+    console.log(`       frozen  tx ${hash}`);
+
+    const after = await viewCall<[boolean, string]>(contractId, "check_transfer", {
+      agent_id: agentId,
+      amount: (1n * ONE_NEAR).toString(),
+    });
+    console.log(`\nVERIFY  1 NEAR after freeze → ${after[0] ? "ALLOW" : "BLOCK"}`);
+    console.log(`       ${after[1]}`);
+  } catch (err) {
+    console.error("FREEZE failed:", err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
 }
 
 if (process.argv.includes("--live")) {
