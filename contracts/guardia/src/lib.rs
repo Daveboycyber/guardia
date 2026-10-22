@@ -30,37 +30,30 @@ impl Default for Policy {
     }
 }
 
+fn parse_yocto(amount: String) -> u128 {
+    amount
+        .parse()
+        .expect("amount must be an integer string in yoctoNEAR")
+}
+
 /// Events (NEP-297 style) for the watcher and indexers
 #[near(event_json(standard = "guardia"))]
 pub enum Event {
     #[event_version("1.0.0")]
-    AgentRegistered {
-        agent_id: AccountId,
-    },
+    AgentRegistered { agent_id: AccountId },
     #[event_version("1.0.0")]
-    AgentFrozen {
-        agent_id: AccountId,
-        by: AccountId,
-    },
+    AgentFrozen { agent_id: AccountId, by: AccountId },
     #[event_version("1.0.0")]
-    AgentUnfrozen {
-        agent_id: AccountId,
-        by: AccountId,
-    },
+    AgentUnfrozen { agent_id: AccountId, by: AccountId },
     #[event_version("1.0.0")]
-    PolicyUpdated {
-        agent_id: AccountId,
-        by: AccountId,
-    },
+    PolicyUpdated { agent_id: AccountId, by: AccountId },
 }
 
 /// Main Guardia contract — on-chain policy engine for agent money flows
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Contract {
-    /// Owner of this Guardia instance (can manage policies and freeze)
     pub owner_id: AccountId,
-    /// Registered agents and their policies
     pub agents: LookupMap<AccountId, Policy>,
 }
 
@@ -74,7 +67,6 @@ impl Contract {
         }
     }
 
-    /// Register a new agent under protection
     pub fn register_agent(&mut self, agent_id: AccountId) {
         self.assert_owner();
         require!(
@@ -92,7 +84,6 @@ impl Contract {
         env::log_str(&format!("Registered agent: {}", agent_id));
     }
 
-    /// Freeze an agent (block all outgoing transfers)
     pub fn freeze_agent(&mut self, agent_id: AccountId) {
         self.assert_owner();
         let mut policy = self
@@ -113,7 +104,6 @@ impl Contract {
         env::log_str(&format!("Frozen agent: {}", agent_id));
     }
 
-    /// Unfreeze an agent
     pub fn unfreeze_agent(&mut self, agent_id: AccountId) {
         self.assert_owner();
         let mut policy = self
@@ -134,12 +124,12 @@ impl Contract {
         env::log_str(&format!("Unfrozen agent: {}", agent_id));
     }
 
-    /// Update policy parameters for an agent
+    /// Limits are decimal strings in yoctoNEAR so JSON can carry them.
     pub fn update_policy(
         &mut self,
         agent_id: AccountId,
-        max_single_transfer: Option<u128>,
-        max_daily_volume: Option<u128>,
+        max_single_transfer: Option<String>,
+        max_daily_volume: Option<String>,
     ) {
         self.assert_owner();
         let mut policy = self
@@ -149,10 +139,10 @@ impl Contract {
             .clone();
 
         if let Some(v) = max_single_transfer {
-            policy.max_single_transfer = v;
+            policy.max_single_transfer = parse_yocto(v);
         }
         if let Some(v) = max_daily_volume {
-            policy.max_daily_volume = v;
+            policy.max_daily_volume = parse_yocto(v);
         }
 
         self.agents.insert(agent_id.clone(), policy);
@@ -166,7 +156,6 @@ impl Contract {
         env::log_str(&format!("Updated policy for agent: {}", agent_id));
     }
 
-    /// Check if an agent is currently frozen
     pub fn is_frozen(&self, agent_id: AccountId) -> bool {
         self.agents
             .get(&agent_id)
@@ -174,17 +163,20 @@ impl Contract {
             .unwrap_or(false)
     }
 
-    /// Get the full policy for an agent
-    /// Returns (max_single_transfer, max_daily_volume, is_frozen) or None if not registered
-    pub fn get_policy(&self, agent_id: AccountId) -> Option<(u128, u128, bool)> {
+    /// Returns (max_single_transfer, max_daily_volume, is_frozen) as decimal strings.
+    pub fn get_policy(&self, agent_id: AccountId) -> Option<(String, String, bool)> {
         self.agents.get(&agent_id).map(|p| {
-            (p.max_single_transfer, p.max_daily_volume, p.is_frozen)
+            (
+                p.max_single_transfer.to_string(),
+                p.max_daily_volume.to_string(),
+                p.is_frozen,
+            )
         })
     }
 
-    /// Check whether a proposed transfer would currently be allowed
-    /// Returns (allowed: bool, reason: String)
-    pub fn check_transfer(&self, agent_id: AccountId, amount: u128) -> (bool, String) {
+    /// `amount` is yoctoNEAR as a decimal string. 1 NEAR = 1000000000000000000000000
+    pub fn check_transfer(&self, agent_id: AccountId, amount: String) -> (bool, String) {
+        let amount = parse_yocto(amount);
         let Some(policy) = self.agents.get(&agent_id) else {
             return (false, "Agent not registered".to_string());
         };
@@ -222,6 +214,10 @@ mod tests {
 
     const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 
+    fn yocto(amount: u128) -> String {
+        amount.to_string()
+    }
+
     fn owner() -> AccountId {
         "owner.testnet".parse().unwrap()
     }
@@ -249,8 +245,8 @@ mod tests {
     fn owner_can_register_and_read_default_policy() {
         let contract = setup();
         let policy = contract.get_policy(agent()).expect("registered");
-        assert_eq!(policy.0, 10 * ONE_NEAR);
-        assert_eq!(policy.1, 50 * ONE_NEAR);
+        assert_eq!(policy.0, yocto(10 * ONE_NEAR));
+        assert_eq!(policy.1, yocto(50 * ONE_NEAR));
         assert!(!policy.2);
         assert!(!contract.is_frozen(agent()));
     }
@@ -267,10 +263,10 @@ mod tests {
     #[test]
     fn check_transfer_allows_under_limit_and_blocks_over() {
         let contract = setup();
-        let (ok, reason) = contract.check_transfer(agent(), ONE_NEAR);
+        let (ok, reason) = contract.check_transfer(agent(), yocto(ONE_NEAR));
         assert!(ok, "{reason}");
 
-        let (ok, reason) = contract.check_transfer(agent(), 11 * ONE_NEAR);
+        let (ok, reason) = contract.check_transfer(agent(), yocto(11 * ONE_NEAR));
         assert!(!ok);
         assert!(reason.contains("exceeds"));
     }
@@ -282,13 +278,13 @@ mod tests {
         contract.freeze_agent(agent());
         assert!(contract.is_frozen(agent()));
 
-        let (ok, reason) = contract.check_transfer(agent(), ONE_NEAR);
+        let (ok, reason) = contract.check_transfer(agent(), yocto(ONE_NEAR));
         assert!(!ok);
         assert_eq!(reason, "Agent is frozen");
 
         set_predecessor(owner());
         contract.unfreeze_agent(agent());
-        let (ok, _) = contract.check_transfer(agent(), ONE_NEAR);
+        let (ok, _) = contract.check_transfer(agent(), yocto(ONE_NEAR));
         assert!(ok);
     }
 
@@ -296,7 +292,7 @@ mod tests {
     fn unknown_agent_is_rejected() {
         set_predecessor(owner());
         let contract = Contract::new(owner());
-        let (ok, reason) = contract.check_transfer(agent(), ONE_NEAR);
+        let (ok, reason) = contract.check_transfer(agent(), yocto(ONE_NEAR));
         assert!(!ok);
         assert_eq!(reason, "Agent not registered");
     }
