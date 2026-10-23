@@ -5,7 +5,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const TESTNET_RPC = "https://rpc.testnet.near.org";
+/** Official public rpc.testnet.near.org is deprecated; FastNear is recommended. */
+const TESTNET_RPC =
+  process.env.NEAR_RPC_URL ?? "https://rpc.testnet.fastnear.com";
 
 type RpcResponse = {
   result?: { result?: number[] };
@@ -37,14 +39,17 @@ export async function viewCall<T>(
   });
   const json = (await res.json()) as RpcResponse;
   if (json.error) {
-    throw new Error(json.error.message ?? JSON.stringify(json.error));
+    throw new Error(
+      typeof json.error.message === "string"
+        ? json.error.message
+        : JSON.stringify(json.error),
+    );
   }
   const bytes = json.result?.result ?? [];
   const text = Buffer.from(bytes).toString("utf8");
   return JSON.parse(text) as T;
 }
 
-/** Resolve owner credentials path under ~/.near-credentials */
 export function defaultCredentialsPath(ownerId: string): string {
   return join(homedir(), ".near-credentials", "testnet", `${ownerId}.json`);
 }
@@ -53,10 +58,6 @@ export function credentialsExist(ownerId: string): boolean {
   return existsSync(defaultCredentialsPath(ownerId));
 }
 
-/**
- * Signed function call using the same near-cli-rs path that already works
- * for this machine (legacy keychain under ~/.near-credentials).
- */
 export async function changeCallViaCli(
   contractId: string,
   method: string,
@@ -91,15 +92,17 @@ export async function changeCallViaCli(
     },
   );
   const out = `${stdout}\n${stderr}`;
-  const txMatch = out.match(/Transaction ID:\s*(\S+)/i)
-    ?? out.match(/https:\/\/explorer\.testnet\.near\.org\/transactions\/(\S+)/i);
+  const txMatch =
+    out.match(/Transaction ID:\s*(\S+)/i) ??
+    out.match(
+      /https:\/\/explorer\.testnet\.near\.org\/transactions\/(\S+)/i,
+    );
   if (out.toLowerCase().includes("error") && !txMatch) {
     throw new Error(out.slice(-800));
   }
   return txMatch?.[1] ?? "ok";
 }
 
-/** Optional: load private_key from near credentials JSON (debug only). */
 export function loadPrivateKeyFromCredentials(ownerId: string): string | null {
   const path = defaultCredentialsPath(ownerId);
   if (!existsSync(path)) return null;
