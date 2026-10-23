@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_AGENT,
+  loadContractId,
+  loadKnownAgents,
+  rememberAgent,
+  saveContractId,
+  saveKnownAgents,
+} from "./lib/config";
 import {
   fetchContractEvents,
   formatEventTime,
@@ -6,31 +14,36 @@ import {
 } from "./lib/events";
 import {
   checkTransfer,
-  DEFAULT_AGENT,
-  DEFAULT_CONTRACT,
   formatNear,
   getPolicy,
   isFrozen,
   nearToYocto,
-  ONE_NEAR,
   type PolicyView,
+  yoctoToNearNumber,
 } from "./lib/near";
+import { pushToast, subscribeToasts, type Toast } from "./lib/toast";
+import {
+  getAccountId,
+  getModal,
+  getSelector,
+  signFunctionCall,
+} from "./lib/wallet";
 
-type LogItem = {
+type Page = "overview" | "agents" | "incidents" | "integrate" | "settings";
+
+type SessionDecision = {
   id: string;
-  kind: "allow" | "block" | "info" | "system";
-  title: string;
-  detail: string;
   at: string;
-  amount?: number;
+  allowed: boolean;
+  amount: number;
+  agentId: string;
+  reason: string;
 };
 
-type FlowStep = {
+type AgentRow = {
   id: string;
-  label: string;
-  description: string;
-  actionLabel: string;
-  run: () => Promise<void>;
+  policy: PolicyView;
+  loading: boolean;
 };
 
 function nowStamp() {
@@ -41,247 +54,257 @@ function nowStamp() {
   });
 }
 
-function riskLevel(amountNear: number, maxNear: number | null): {
-  score: number;
-  label: string;
-  tone: "low" | "mid" | "high" | "critical";
-} {
-  if (maxNear == null || maxNear <= 0) {
-    return { score: 0, label: "Unknown", tone: "mid" };
-  }
-  const ratio = amountNear / maxNear;
-  if (ratio <= 0.25) return { score: 12, label: "Nominal", tone: "low" };
-  if (ratio <= 0.6) return { score: 38, label: "Elevated", tone: "mid" };
-  if (ratio <= 1) return { score: 62, label: "Near limit", tone: "high" };
-  return { score: 94, label: "Policy breach", tone: "critical" };
+function riskTone(amount: number, maxNear: number | null) {
+  if (maxNear == null || maxNear <= 0) return "mid" as const;
+  const r = amount / maxNear;
+  if (r <= 0.25) return "low" as const;
+  if (r <= 0.6) return "mid" as const;
+  if (r <= 1) return "high" as const;
+  return "critical" as const;
 }
 
 export default function App() {
-  const contractId = DEFAULT_CONTRACT;
-  const agentId = DEFAULT_AGENT;
-
+  const [page, setPage] = useState<Page>("overview");
+  const [contractId, setContractId] = useState(loadContractId);
+  const [activeAgent, setActiveAgent] = useState(
+    () => loadKnownAgents()[0] ?? DEFAULT_AGENT,
+  );
+  const [agents, setAgents] = useState<string[]>(loadKnownAgents);
+  const [agentRows, setAgentRows] = useState<AgentRow[]>([]);
   const [policy, setPolicy] = useState<PolicyView>(null);
   const [frozen, setFrozen] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [log, setLog] = useState<LogItem[]>([]);
-  const [customNear, setCustomNear] = useState("3");
-  const [flowIndex, setFlowIndex] = useState(0);
-  const [lastDecision, setLastDecision] = useState<{
-    allowed: boolean;
-    reason: string;
-    amount: number;
-  } | null>(null);
-  const [stats, setStats] = useState({ allows: 0, blocks: 0 });
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [chainEvents, setChainEvents] = useState<ChainEvent[]>([]);
-  const [streamError, setStreamError] = useState<string | null>(null);
   const [streamLive, setStreamLive] = useState(false);
-  const seenTx = useRef(new Set<string>());
+  const [decisions, setDecisions] = useState<SessionDecision[]>([]);
+  const [customNear, setCustomNear] = useState("1");
+  const [registerId, setRegisterId] = useState("");
+  const [limitSingle, setLimitSingle] = useState("10");
+  const [limitDaily, setLimitDaily] = useState("50");
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [demoMode, setDemoMode] = useState(false);
+  const [flowStep, setFlowStep] = useState(0);
 
-  const maxNear = useMemo(() => {
-    if (!policy) return null;
-    try {
-      return Number(BigInt(policy.maxSingle) / ONE_NEAR);
-    } catch {
-      return null;
-    }
-  }, [policy]);
+  useEffect(() => subscribeToasts(setToasts), []);
 
-  const pushLog = useCallback((item: Omit<LogItem, "id" | "at">) => {
-    setLog((prev) =>
-      [{ ...item, id: crypto.randomUUID(), at: nowStamp() }, ...prev].slice(0, 50),
-    );
+  useEffect(() => {
+    void (async () => {
+      try {
+        await getSelector();
+        const id = await getAccountId();
+        setAccountId(id);
+        const selector = await getSelector();
+        const sub = selector.store.observable.subscribe(async () => {
+          setAccountId(await getAccountId());
+        });
+        return () => sub.unsubscribe();
+      } catch (e) {
+        console.warn("Wallet init", e);
+      }
+    })();
   }, []);
 
-  const refresh = useCallback(async () => {
-    setError(null);
-    try {
+  const refreshAgent = useCallback(
+    async (agentId: string) => {
       const [p, f] = await Promise.all([
         getPolicy(contractId, agentId),
         isFrozen(contractId, agentId),
       ]);
+      return { policy: p, frozen: f };
+    },
+    [contractId],
+  );
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { policy: p, frozen: f } = await refreshAgent(activeAgent);
       setPolicy(p);
       setFrozen(f);
+      if (p) {
+        const s = yoctoToNearNumber(p.maxSingle);
+        const d = yoctoToNearNumber(p.maxDaily);
+        if (s != null) setLimitSingle(String(s));
+        if (d != null) setLimitDaily(String(d));
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      pushToast("err", e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [contractId, agentId]);
+  }, [activeAgent, refreshAgent]);
+
+  const refreshAllAgents = useCallback(async () => {
+    const rows: AgentRow[] = agents.map((id) => ({
+      id,
+      policy: null,
+      loading: true,
+    }));
+    setAgentRows(rows);
+    const settled = await Promise.all(
+      agents.map(async (id) => {
+        try {
+          const p = await getPolicy(contractId, id);
+          return { id, policy: p, loading: false } satisfies AgentRow;
+        } catch {
+          return { id, policy: null, loading: false } satisfies AgentRow;
+        }
+      }),
+    );
+    setAgentRows(settled);
+  }, [agents, contractId]);
 
   const pullChain = useCallback(async () => {
     try {
-      const events = await fetchContractEvents(contractId, 25);
+      const events = await fetchContractEvents(contractId, 30);
       setChainEvents(events);
       setStreamLive(true);
-      setStreamError(null);
-
-      for (const ev of events) {
-        if (seenTx.current.has(ev.id)) continue;
-        seenTx.current.add(ev.id);
-        // Only announce newly seen txs after the first successful pull
-        if (seenTx.current.size > events.length) {
-          pushLog({
-            kind: "system",
-            title: `Chain · ${ev.method}`,
-            detail: `${ev.summary} · ${ev.txHash.slice(0, 10)}…`,
-          });
-        }
-      }
-      // Seed seen set on first load without flooding the decision feed
-      if (seenTx.current.size <= events.length) {
-        for (const ev of events) seenTx.current.add(ev.id);
-      }
-    } catch (e) {
+    } catch {
       setStreamLive(false);
-      setStreamError(e instanceof Error ? e.message : String(e));
     }
-  }, [contractId, pushLog]);
+  }, [contractId]);
 
   useEffect(() => {
     void refresh();
     void pullChain();
+    void refreshAllAgents();
     const t = setInterval(() => {
       void refresh();
       void pullChain();
-    }, 10_000);
+    }, 12_000);
     return () => clearInterval(t);
-  }, [refresh, pullChain]);
+  }, [refresh, pullChain, refreshAllAgents]);
 
-  const runCheck = useCallback(
-    async (nearAmount: number, label?: string) => {
-      setBusy(true);
-      setError(null);
-      try {
-        const result = await checkTransfer(
-          contractId,
-          agentId,
-          nearToYocto(nearAmount),
-        );
-        setLastDecision({ ...result, amount: nearAmount });
-        setStats((s) =>
-          result.allowed
-            ? { ...s, allows: s.allows + 1 }
-            : { ...s, blocks: s.blocks + 1 },
-        );
-        pushLog({
-          kind: result.allowed ? "allow" : "block",
-          title: `${result.allowed ? "ALLOW" : "BLOCK"} · ${nearAmount} NEAR${label ? ` · ${label}` : ""}`,
-          detail: result.reason,
-          amount: nearAmount,
-        });
-        await refresh();
-        return result;
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        throw e;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [agentId, contractId, pushLog, refresh],
-  );
+  const maxNear = policy ? yoctoToNearNumber(policy.maxSingle) : null;
 
-  const flowSteps: FlowStep[] = useMemo(
-    () => [
-      {
-        id: "sync",
-        label: "Sync state",
-        description: "Pull live policy, freeze status, and recent chain events.",
-        actionLabel: "Sync on-chain state",
-        run: async () => {
-          await Promise.all([refresh(), pullChain()]);
-          pushLog({
-            kind: "system",
-            title: "State synchronized",
-            detail: `Agent ${agentId} · frozen=${String(frozen)}`,
-          });
-        },
-      },
-      {
-        id: "baseline",
-        label: "Baseline",
-        description: "Probe a normal 1 NEAR payment under the policy ceiling.",
-        actionLabel: "Run baseline (1 NEAR)",
-        run: async () => {
-          await runCheck(1, "baseline");
-        },
-      },
-      {
-        id: "attack",
-        label: "Attack",
-        description: "Simulate an oversized drain attempt (20 NEAR).",
-        actionLabel: "Simulate drain (20 NEAR)",
-        run: async () => {
-          await runCheck(20, "drain attempt");
-        },
-      },
-      {
-        id: "response",
-        label: "Response",
-        description:
-          "Auto-freeze runs in the watcher CLI. Watch the chain stream for freeze_agent.",
-        actionLabel: "Refresh chain stream",
-        run: async () => {
-          await pullChain();
-          pushLog({
-            kind: "info",
-            title: "Awaiting freeze on chain",
-            detail:
-              "Run watcher GUARDIA_NEAR=20 or near CLI freeze_agent; stream updates automatically.",
-          });
-        },
-      },
-      {
-        id: "verify",
-        label: "Verify",
-        description: "Re-check 1 NEAR to confirm post-incident enforcement.",
-        actionLabel: "Verify 1 NEAR",
-        run: async () => {
-          await runCheck(1, "post-incident");
-        },
-      },
-    ],
-    [agentId, frozen, pullChain, pushLog, refresh, runCheck],
-  );
+  const stats = useMemo(() => {
+    const allows = decisions.filter((d) => d.allowed).length;
+    const blocks = decisions.filter((d) => !d.allowed).length;
+    const freezes = chainEvents.filter((e) => e.method === "freeze_agent").length;
+    return { allows, blocks, freezes, txs: chainEvents.length };
+  }, [decisions, chainEvents]);
 
-  const activeStep = flowSteps[Math.min(flowIndex, flowSteps.length - 1)];
+  const incidents = useMemo(() => {
+    return chainEvents.filter((e) =>
+      ["freeze_agent", "unfreeze_agent", "update_policy", "register_agent"].includes(
+        e.method,
+      ),
+    );
+  }, [chainEvents]);
 
-  async function advanceFlow() {
-    if (busy) return;
+  async function connectWallet() {
+    const modal = await getModal();
+    modal.show();
+  }
+
+  async function runCheck(amount: number) {
+    setBusy(true);
     try {
-      await activeStep.run();
-      setFlowIndex((i) => Math.min(i + 1, flowSteps.length - 1));
-    } catch {
-      /* error already set */
+      const result = await checkTransfer(
+        contractId,
+        activeAgent,
+        nearToYocto(amount),
+      );
+      setDecisions((d) =>
+        [
+          {
+            id: crypto.randomUUID(),
+            at: nowStamp(),
+            allowed: result.allowed,
+            amount,
+            agentId: activeAgent,
+            reason: result.reason,
+          },
+          ...d,
+        ].slice(0, 40),
+      );
+      pushToast(
+        result.allowed ? "ok" : "err",
+        result.allowed
+          ? `ALLOW ${amount} NEAR`
+          : `BLOCK ${amount} NEAR — ${result.reason}`,
+      );
+      await refresh();
+      return result;
+    } catch (e) {
+      pushToast("err", e instanceof Error ? e.message : String(e));
+      throw e;
+    } finally {
+      setBusy(false);
     }
   }
 
-  function resetFlow() {
-    setFlowIndex(0);
-    setLastDecision(null);
-    setStats({ allows: 0, blocks: 0 });
-    setLog([]);
-    pushLog({
-      kind: "system",
-      title: "Flow reset",
-      detail: "Incident playbook returned to step 1.",
-    });
+  async function ownerCall(method: string, args: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const hash = await signFunctionCall({ contractId, method, args });
+      pushToast("ok", `${method} submitted${hash ? ` · ${hash.slice(0, 10)}…` : ""}`);
+      await new Promise((r) => setTimeout(r, 1500));
+      await Promise.all([refresh(), pullChain(), refreshAllAgents()]);
+    } catch (e) {
+      pushToast("err", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const probeRisk = riskLevel(Number(customNear) || 0, maxNear);
-  const lastRisk = lastDecision
-    ? riskLevel(lastDecision.amount, maxNear)
-    : null;
+  async function runPlaybook() {
+    const steps = [
+      async () => {
+        await refresh();
+        await pullChain();
+        pushToast("info", "Synced on-chain state");
+      },
+      async () => {
+        await runCheck(1);
+      },
+      async () => {
+        await runCheck(20);
+      },
+      async () => {
+        if (accountId) {
+          await ownerCall("freeze_agent", { agent_id: activeAgent });
+        } else {
+          pushToast("info", "Connect owner wallet to freeze, or use the watcher CLI");
+          await pullChain();
+        }
+      },
+      async () => {
+        await runCheck(1);
+      },
+    ];
+    for (let i = 0; i < steps.length; i++) {
+      setFlowStep(i);
+      await steps[i]();
+    }
+    setFlowStep(4);
+    pushToast("ok", "Playbook complete");
+  }
 
-  const statusClass =
-    frozen === null ? "unknown" : frozen ? "frozen" : "live";
-  const statusLabel =
-    frozen === null ? "Connecting" : frozen ? "Frozen" : "Live";
+  function NavBtn({ id, label }: { id: Page; label: string }) {
+    return (
+      <button
+        type="button"
+        className={`nav-btn ${page === id ? "active" : ""}`}
+        onClick={() => setPage(id)}
+      >
+        {label}
+      </button>
+    );
+  }
 
   return (
     <div className="shell">
+      <div className="toast-stack">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.kind}`}>
+            {t.message}
+          </div>
+        ))}
+      </div>
+
       <aside className="rail">
         <div className="rail-brand">
           <span className="mark" />
@@ -291,254 +314,363 @@ export default function App() {
           </div>
         </div>
 
+        <nav className="nav">
+          <NavBtn id="overview" label="Overview" />
+          <NavBtn id="agents" label="Agents" />
+          <NavBtn id="incidents" label="Incidents" />
+          <NavBtn id="integrate" label="Integrate" />
+          <NavBtn id="settings" label="Settings" />
+        </nav>
+
         <div className="rail-section">
           <p className="rail-label">Network</p>
           <div className="rail-chip">NEAR testnet</div>
           <p className="rail-meta">Contract</p>
           <code className="rail-code">{contractId}</code>
-          <p className="rail-meta">Agent</p>
-          <code className="rail-code">{agentId}</code>
+          <p className="rail-meta">Active agent</p>
+          <code className="rail-code">{activeAgent}</code>
         </div>
 
-        <div className="rail-section stats">
-          <div>
-            <span>Allows</span>
-            <strong>{stats.allows}</strong>
-          </div>
-          <div>
-            <span>Blocks</span>
-            <strong className="danger-text">{stats.blocks}</strong>
-          </div>
+        <div className={`stream-pill ${streamLive ? "on" : "off"}`}>
+          <span className="pulse" />
+          {streamLive ? "Indexer live" : "Indexer offline"}
         </div>
 
-        <div className="rail-section">
-          <p className="rail-label">Stream</p>
-          <div className={`stream-pill ${streamLive ? "on" : "off"}`}>
-            <span className="pulse" />
-            {streamLive ? "Indexer live" : "Indexer offline"}
-          </div>
+        <div className="wallet-box">
+          {accountId ? (
+            <>
+              <span className="rail-meta">Connected</span>
+              <code className="rail-code">{accountId}</code>
+            </>
+          ) : (
+            <button type="button" className="btn-primary block" onClick={() => void connectWallet()}>
+              Connect owner wallet
+            </button>
+          )}
         </div>
-
-        <a
-          className="rail-link"
-          href={`https://explorer.testnet.near.org/accounts/${contractId}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open explorer ↗
-        </a>
       </aside>
 
       <main className="main">
-        <header className="main-head">
+        <header className="hero">
           <div>
-            <p className="eyebrow">Operations console</p>
-            <h1>Incident response flow</h1>
+            <p className="eyebrow">AI agent treasury control · NEAR</p>
+            <h1>
+              Stop agent drains before value leaves the wallet
+            </h1>
+            <p className="hero-copy">
+              Guardia is an on-chain policy layer for autonomous payments. Limits
+              are enforced on NEAR; violations can freeze the agent until an owner
+              intervenes.
+            </p>
           </div>
-          <div className={`status-pill ${statusClass}`}>
-            <span className="pulse" />
-            {statusLabel}
+          <div className="hero-side">
+            <div className={`status-pill ${frozen ? "frozen" : "live"}`}>
+              <span className="pulse" />
+              {loading ? "Syncing" : frozen ? "Agent frozen" : "Agent live"}
+            </div>
+            <label className="mode-toggle">
+              <input
+                type="checkbox"
+                checked={demoMode}
+                onChange={(e) => setDemoMode(e.target.checked)}
+              />
+              Guided demo hints
+            </label>
           </div>
         </header>
 
-        {error && <div className="error-banner">{error}</div>}
+        {page === "overview" && (
+          <>
+            <section className="stat-row">
+              <div className="stat-card">
+                <span>Session allows</span>
+                <strong>{stats.allows}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Session blocks</span>
+                <strong className="danger-text">{stats.blocks}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Chain freezes seen</span>
+                <strong>{stats.freezes}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Indexed txs</span>
+                <strong>{stats.txs}</strong>
+              </div>
+            </section>
 
-        <section className="flow-panel">
-          <div className="flow-track">
-            {flowSteps.map((step, i) => {
-              const state =
-                i < flowIndex ? "done" : i === flowIndex ? "active" : "todo";
-              return (
-                <button
-                  key={step.id}
-                  type="button"
-                  className={`flow-step ${state}`}
-                  onClick={() => setFlowIndex(i)}
-                  disabled={busy}
-                >
-                  <span className="flow-index">{i + 1}</span>
-                  <span className="flow-label">{step.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flow-body">
-            <div>
-              <h2>{activeStep.label}</h2>
-              <p>{activeStep.description}</p>
-            </div>
-            <div className="flow-actions">
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={busy || loading}
-                onClick={() => void advanceFlow()}
-              >
-                {busy ? "Running…" : activeStep.actionLabel}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={busy}
-                onClick={resetFlow}
-              >
-                Reset flow
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <div className="workspace">
-          <section className="panel">
-            <div className="panel-header">
-              <h2>Policy surface</h2>
-              <button
-                type="button"
-                className="btn-ghost sm"
-                disabled={loading || busy}
-                onClick={() => void refresh()}
-              >
-                Refresh
-              </button>
-            </div>
-
-            {loading ? (
-              <div className="loading">Syncing on-chain state…</div>
-            ) : (
-              <>
-                <div className="metric-grid">
-                  <div className="metric">
-                    <label>Max single</label>
-                    <strong>{policy ? formatNear(policy.maxSingle) : "—"}</strong>
-                  </div>
-                  <div className="metric">
-                    <label>Max daily</label>
-                    <strong>{policy ? formatNear(policy.maxDaily) : "—"}</strong>
-                  </div>
-                  <div className="metric">
-                    <label>Freeze flag</label>
-                    <strong className={frozen ? "danger-text" : "ok-text"}>
-                      {frozen == null ? "—" : frozen ? "TRUE" : "FALSE"}
-                    </strong>
-                  </div>
-                  <div className="metric">
-                    <label>Last verdict</label>
-                    <strong>
-                      {lastDecision
-                        ? lastDecision.allowed
-                          ? "ALLOW"
-                          : "BLOCK"
-                        : "—"}
-                    </strong>
-                  </div>
+            {demoMode && (
+              <section className="panel playbook">
+                <div className="panel-header">
+                  <h2>90-second playbook</h2>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={busy}
+                    onClick={() => void runPlaybook()}
+                  >
+                    {busy ? "Running…" : "Run full demo"}
+                  </button>
                 </div>
+                <ol className="playbook-steps">
+                  {["Sync", "Baseline 1 NEAR", "Attack 20 NEAR", "Freeze", "Verify"].map(
+                    (label, i) => (
+                      <li key={label} className={i <= flowStep ? "done" : ""}>
+                        {label}
+                      </li>
+                    ),
+                  )}
+                </ol>
+              </section>
+            )}
 
-                {lastRisk && (
-                  <div className={`risk-card ${lastRisk.tone}`}>
-                    <div className="risk-head">
-                      <span>Risk assessment</span>
-                      <strong>{lastRisk.label}</strong>
+            <div className="workspace">
+              <section className="panel">
+                <div className="panel-header">
+                  <h2>Policy surface</h2>
+                  <button type="button" className="btn-ghost sm" disabled={busy} onClick={() => void refresh()}>
+                    Refresh
+                  </button>
+                </div>
+                {loading ? (
+                  <div className="skeleton-grid">
+                    <div className="skeleton" />
+                    <div className="skeleton" />
+                    <div className="skeleton" />
+                    <div className="skeleton" />
+                  </div>
+                ) : (
+                  <div className="metric-grid">
+                    <div className="metric">
+                      <label>Max single</label>
+                      <strong>{policy ? formatNear(policy.maxSingle) : "Unregistered"}</strong>
                     </div>
-                    <div className="risk-bar">
-                      <div style={{ width: `${lastRisk.score}%` }} />
+                    <div className="metric">
+                      <label>Max daily</label>
+                      <strong>{policy ? formatNear(policy.maxDaily) : "—"}</strong>
                     </div>
-                    <p>
-                      Last probe {lastDecision?.amount} NEAR against{" "}
-                      {maxNear ?? "?"} NEAR ceiling · {lastDecision?.reason}
-                    </p>
+                    <div className="metric">
+                      <label>Freeze</label>
+                      <strong className={frozen ? "danger-text" : "ok-text"}>
+                        {frozen ? "TRUE" : "FALSE"}
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <label>Agent</label>
+                      <strong className="small-mono">{activeAgent}</strong>
+                    </div>
                   </div>
                 )}
-              </>
-            )}
-          </section>
 
+                <div className="owner-actions">
+                  <button
+                    type="button"
+                    className="btn-danger"
+                    disabled={busy}
+                    onClick={() => void ownerCall("freeze_agent", { agent_id: activeAgent })}
+                  >
+                    Freeze agent
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={busy}
+                    onClick={() => void ownerCall("unfreeze_agent", { agent_id: activeAgent })}
+                  >
+                    Unfreeze
+                  </button>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-header">
+                  <h2>Policy check console</h2>
+                </div>
+                <p className="panel-copy">
+                  Evaluates a proposed transfer size against on-chain rules. This does
+                  <strong> not</strong> move funds — agents should call this before paying.
+                </p>
+                <div className="probe-input">
+                  <input
+                    type="number"
+                    min={0}
+                    value={customNear}
+                    onChange={(e) => setCustomNear(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={busy}
+                    onClick={() => void runCheck(Number(customNear) || 0)}
+                  >
+                    Evaluate
+                  </button>
+                </div>
+                <div className={`risk-inline ${riskTone(Number(customNear) || 0, maxNear)}`}>
+                  <span>Projected risk vs limit</span>
+                  <strong>{maxNear != null ? `${maxNear} NEAR cap` : "No policy"}</strong>
+                </div>
+                <div className="quick-actions">
+                  <button type="button" className="btn-ghost" disabled={busy} onClick={() => void runCheck(1)}>
+                    1 NEAR
+                  </button>
+                  <button type="button" className="btn-ghost" disabled={busy} onClick={() => void runCheck(5)}>
+                    5 NEAR
+                  </button>
+                  <button type="button" className="btn-danger" disabled={busy} onClick={() => void runCheck(20)}>
+                    20 NEAR attack
+                  </button>
+                </div>
+              </section>
+
+              <section className="panel wide">
+                <div className="panel-header">
+                  <h2>Session decisions</h2>
+                </div>
+                <div className="feed">
+                  {decisions.length === 0 ? (
+                    <div className="empty">No probes yet. Run Evaluate or the playbook.</div>
+                  ) : (
+                    decisions.map((d) => (
+                      <article key={d.id} className={`event ${d.allowed ? "allow" : "block"}`}>
+                        <div className="event-tag">{d.allowed ? "allow" : "block"}</div>
+                        <div className="event-body">
+                          <strong>
+                            {d.amount} NEAR · {d.agentId}
+                          </strong>
+                          <span>
+                            {d.at} · {d.reason}
+                          </span>
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+            </div>
+          </>
+        )}
+
+        {page === "agents" && (
           <section className="panel">
             <div className="panel-header">
-              <h2>Probe console</h2>
+              <h2>Protected agents</h2>
+              <button type="button" className="btn-ghost sm" onClick={() => void refreshAllAgents()}>
+                Refresh all
+              </button>
             </div>
-            <p className="panel-copy">
-              Submit a proposed transfer size. Guardia evaluates against live
-              policy without moving funds.
-            </p>
+            <div className="table">
+              <div className="table-head">
+                <span>Agent</span>
+                <span>Max single</span>
+                <span>Status</span>
+                <span />
+              </div>
+              {agentRows.map((row) => (
+                <div key={row.id} className="table-row">
+                  <code>{row.id}</code>
+                  <span>
+                    {row.loading
+                      ? "…"
+                      : row.policy
+                        ? formatNear(row.policy.maxSingle)
+                        : "Not registered"}
+                  </span>
+                  <span className={row.policy?.frozen ? "danger-text" : "ok-text"}>
+                    {row.loading ? "…" : row.policy?.frozen ? "Frozen" : row.policy ? "Live" : "—"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-ghost sm"
+                    onClick={() => {
+                      setActiveAgent(row.id);
+                      setPage("overview");
+                      pushToast("info", `Active agent → ${row.id}`);
+                    }}
+                  >
+                    Open
+                  </button>
+                </div>
+              ))}
+            </div>
 
-            <div className="probe-row">
-              <label htmlFor="custom-near">Amount (NEAR)</label>
+            <div className="form-block">
+              <h3>Register agent</h3>
+              <p className="panel-copy">Owner-signed. Adds on-chain policy with default limits.</p>
               <div className="probe-input">
                 <input
-                  id="custom-near"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={customNear}
-                  onChange={(e) => setCustomNear(e.target.value)}
+                  placeholder="agent-name.testnet"
+                  value={registerId}
+                  onChange={(e) => setRegisterId(e.target.value)}
                 />
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={busy || !customNear}
-                  onClick={() => void runCheck(Number(customNear) || 0, "custom")}
+                  disabled={busy || !registerId}
+                  onClick={async () => {
+                    await ownerCall("register_agent", { agent_id: registerId.trim() });
+                    rememberAgent(registerId.trim());
+                    const next = loadKnownAgents();
+                    setAgents(next);
+                    saveKnownAgents(next);
+                    setRegisterId("");
+                  }}
                 >
-                  Evaluate
+                  Register
                 </button>
               </div>
             </div>
 
-            <div className={`risk-inline ${probeRisk.tone}`}>
-              <span>Projected risk</span>
-              <strong>{probeRisk.label}</strong>
-            </div>
-
-            <div className="quick-actions">
+            <div className="form-block">
+              <h3>Update limits for active agent</h3>
+              <div className="dual-input">
+                <label>
+                  Max single (NEAR)
+                  <input value={limitSingle} onChange={(e) => setLimitSingle(e.target.value)} />
+                </label>
+                <label>
+                  Max daily (NEAR)
+                  <input value={limitDaily} onChange={(e) => setLimitDaily(e.target.value)} />
+                </label>
+              </div>
               <button
                 type="button"
-                className="btn-ghost"
+                className="btn-primary"
                 disabled={busy}
-                onClick={() => void runCheck(1)}
+                onClick={() =>
+                  void ownerCall("update_policy", {
+                    agent_id: activeAgent,
+                    max_single_transfer: nearToYocto(limitSingle),
+                    max_daily_volume: nearToYocto(limitDaily),
+                  })
+                }
               >
-                1 NEAR
-              </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={busy}
-                onClick={() => void runCheck(5)}
-              >
-                5 NEAR
-              </button>
-              <button
-                type="button"
-                className="btn-danger"
-                disabled={busy}
-                onClick={() => void runCheck(20, "attack")}
-              >
-                20 NEAR attack
+                Save policy
               </button>
             </div>
           </section>
+        )}
 
-          <section className="panel feed-panel">
+        {page === "incidents" && (
+          <section className="panel">
             <div className="panel-header">
-              <h2>On-chain event stream</h2>
-              <button
-                type="button"
-                className="btn-ghost sm"
-                onClick={() => void pullChain()}
-              >
-                Pull now
+              <h2>On-chain incidents & ops</h2>
+              <button type="button" className="btn-ghost sm" onClick={() => void pullChain()}>
+                Pull stream
               </button>
             </div>
-            {streamError && (
-              <div className="stream-error">Indexer: {streamError}</div>
-            )}
+            <p className="panel-copy">
+              Derived from indexed transactions to {contractId}. Freeze, unfreeze, register,
+              and policy updates appear here.
+            </p>
             <div className="chain-feed">
-              {chainEvents.length === 0 ? (
-                <div className="feed-empty">
-                  Waiting for transactions to <code>{contractId}</code>. Freeze,
-                  register, and policy calls appear here within ~10s.
+              {incidents.length === 0 ? (
+                <div className="empty">
+                  No management txs indexed yet. Freeze an agent to populate this feed.
                 </div>
               ) : (
-                chainEvents.map((ev) => (
+                incidents.map((ev) => (
                   <article key={ev.id} className={`chain-event ${ev.status}`}>
                     <div className="chain-meta">
                       <span className="chain-method">{ev.method}</span>
@@ -548,56 +680,105 @@ export default function App() {
                     {ev.eventName && (
                       <span className="chain-nep">NEP-297 · {ev.eventName}</span>
                     )}
-                    <a
-                      href={ev.explorerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="chain-link"
-                    >
-                      {ev.txHash.slice(0, 16)}… ↗
+                    <a className="chain-link" href={ev.explorerUrl} target="_blank" rel="noreferrer">
+                      {ev.txHash.slice(0, 18)}… ↗
                     </a>
                   </article>
                 ))
               )}
             </div>
           </section>
+        )}
 
-          <section className="panel feed-panel">
-            <div className="panel-header">
-              <h2>Session decision timeline</h2>
-            </div>
-            <div className="feed">
-              {log.length === 0 ? (
-                <div className="feed-empty">
-                  Run the incident flow or a probe to stream live ALLOW / BLOCK
-                  decisions in this session.
-                </div>
-              ) : (
-                log.map((item) => (
-                  <article key={item.id} className={`event ${item.kind}`}>
-                    <div className="event-tag">{item.kind}</div>
-                    <div className="event-body">
-                      <strong>{item.title}</strong>
-                      <span>
-                        {item.at} · {item.detail}
-                      </span>
-                    </div>
-                  </article>
-                ))
-              )}
+        {page === "integrate" && (
+          <section className="panel integrate">
+            <h2 className="page-title">Integrate Guardia into an agent</h2>
+            <p className="panel-copy">
+              Real use case: every autonomous payment path calls Guardia <em>before</em> moving
+              funds. If blocked, do not pay. If repeatedly blocked, the owner freeze path stops
+              further damage.
+            </p>
+            <div className="integrate-grid">
+              <div className="integrate-card">
+                <h3>1. Check policy</h3>
+                <pre>{`near view ${contractId} check_transfer \
+  '{"agent_id":"${activeAgent}","amount":"1000000000000000000000000"}'`}</pre>
+              </div>
+              <div className="integrate-card">
+                <h3>2. Watcher auto-freeze</h3>
+                <pre>{`cd watcher
+GUARDIA_CONTRACT=${contractId} \
+GUARDIA_AGENT=${activeAgent} \
+GUARDIA_NEAR=20 \
+npm run live`}</pre>
+              </div>
+              <div className="integrate-card">
+                <h3>3. Agent rule</h3>
+                <ul>
+                  <li>Call <code>check_transfer</code> with yocto amount as a string</li>
+                  <li>Only execute the payment if <code>allowed === true</code></li>
+                  <li>On block, alert ops / wait for unfreeze</li>
+                </ul>
+              </div>
+              <div className="integrate-card">
+                <h3>4. Sequence</h3>
+                <pre>{`Agent intent
+   → Guardia check_transfer
+       → ALLOW → send payment
+       → BLOCK → abort
+           → watcher freeze_agent
+           → owner investigates`}</pre>
+              </div>
             </div>
           </section>
-        </div>
+        )}
+
+        {page === "settings" && (
+          <section className="panel">
+            <h2 className="page-title">Settings</h2>
+            <div className="form-block">
+              <h3>Contract account</h3>
+              <div className="probe-input">
+                <input
+                  value={contractId}
+                  onChange={(e) => setContractId(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => {
+                    saveContractId(contractId.trim());
+                    pushToast("ok", "Contract saved");
+                    void refresh();
+                    void pullChain();
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+            <div className="form-block">
+              <h3>Known agents (local)</h3>
+              <p className="panel-copy">Stored in this browser. Used by the Agents page.</p>
+              <pre>{JSON.stringify(agents, null, 2)}</pre>
+            </div>
+            <div className="form-block">
+              <h3>Wallet</h3>
+              <p className="panel-copy">
+                Connect the contract owner (e.g. skar.testnet) via MyNearWallet testnet to sign
+                freeze, unfreeze, register, and policy updates.
+              </p>
+              <button type="button" className="btn-primary" onClick={() => void connectWallet()}>
+                {accountId ? "Switch wallet" : "Connect wallet"}
+              </button>
+            </div>
+          </section>
+        )}
 
         <footer className="footer-note">
-          Chain stream polls NearBlocks testnet for <code>{contractId}</code>{" "}
-          every 10s and parses NEP-297 <code>EVENT_JSON</code> logs when present.
-          Probes call <code>check_transfer</code> over RPC.{" "}
-          <a
-            href="https://github.com/Daveboycyber/guardia"
-            target="_blank"
-            rel="noreferrer"
-          >
+          Guardia · policy checks are read-only views; freezes are owner-signed txs on{" "}
+          <code>{contractId}</code>.{" "}
+          <a href="https://github.com/Daveboycyber/guardia" target="_blank" rel="noreferrer">
             Source
           </a>
         </footer>

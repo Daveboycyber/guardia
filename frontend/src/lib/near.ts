@@ -1,8 +1,4 @@
-const RPC = import.meta.env.VITE_NEAR_RPC ?? "https://rpc.testnet.fastnear.com";
-
-export const DEFAULT_CONTRACT = "skar.testnet";
-export const DEFAULT_AGENT = "agent.skar.testnet";
-export const ONE_NEAR = 10n ** 24n;
+import { ONE_NEAR, RPC_URL } from "./config";
 
 export type PolicyView = {
   maxSingle: string;
@@ -15,7 +11,7 @@ async function viewCall<T>(
   method: string,
   args: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(RPC, {
+  const res = await fetch(RPC_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -76,8 +72,9 @@ export async function checkTransfer(
   return { allowed, reason };
 }
 
-export function nearToYocto(near: number): string {
-  return (BigInt(near) * ONE_NEAR).toString();
+export function nearToYocto(near: number | string): string {
+  const n = typeof near === "string" ? Number(near) : near;
+  return (BigInt(Math.floor(n)) * ONE_NEAR).toString();
 }
 
 export function formatNear(yocto: string): string {
@@ -90,5 +87,13 @@ export function formatNear(yocto: string): string {
     return `${whole}.${fracStr} NEAR`;
   } catch {
     return yocto;
+  }
+}
+
+export function yoctoToNearNumber(yocto: string): number | null {
+  try {
+    return Number(BigInt(yocto) / ONE_NEAR);
+  } catch {
+    return null;
   }
 }
