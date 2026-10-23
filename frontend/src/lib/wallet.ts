@@ -1,6 +1,5 @@
-import { setupWalletSelector, type WalletSelector } from "@near-wallet-selector/core";
-import { setupModal, type WalletSelectorModal } from "@near-wallet-selector/modal-ui";
-import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
+import type { WalletSelector } from "@near-wallet-selector/core";
+import type { WalletSelectorModal } from "@near-wallet-selector/modal-ui";
 import { NETWORK_ID, RPC_URL } from "./config";
 
 let selectorPromise: Promise<WalletSelector> | null = null;
@@ -8,20 +7,26 @@ let modal: WalletSelectorModal | null = null;
 
 export async function getSelector(): Promise<WalletSelector> {
   if (!selectorPromise) {
-    selectorPromise = setupWalletSelector({
-      network: {
-        networkId: NETWORK_ID,
-        nodeUrl: RPC_URL,
-        helperUrl: "https://helper.testnet.near.org",
-        explorerUrl: "https://explorer.testnet.near.org",
-        indexerUrl: "https://api-testnet.nearblocks.io",
-      },
-      modules: [
-        setupMyNearWallet({
-          walletUrl: "https://testnet.mynearwallet.com",
-        }),
-      ],
-    });
+    selectorPromise = (async () => {
+      const { setupWalletSelector } = await import("@near-wallet-selector/core");
+      const { setupMyNearWallet } = await import(
+        "@near-wallet-selector/my-near-wallet"
+      );
+      return setupWalletSelector({
+        network: {
+          networkId: NETWORK_ID,
+          nodeUrl: RPC_URL,
+          helperUrl: "https://helper.testnet.near.org",
+          explorerUrl: "https://explorer.testnet.near.org",
+          indexerUrl: "https://api-testnet.nearblocks.io",
+        },
+        modules: [
+          setupMyNearWallet({
+            walletUrl: "https://testnet.mynearwallet.com",
+          }),
+        ],
+      });
+    })();
   }
   return selectorPromise;
 }
@@ -29,19 +34,25 @@ export async function getSelector(): Promise<WalletSelector> {
 export async function getModal(): Promise<WalletSelectorModal> {
   const selector = await getSelector();
   if (!modal) {
+    const { setupModal } = await import("@near-wallet-selector/modal-ui");
     modal = setupModal(selector, {
       contractId: "skar.testnet",
-      description: "Connect the Guardia owner account to freeze, unfreeze, and manage agents.",
+      description:
+        "Connect the Guardia owner account to freeze, unfreeze, and manage agents.",
     });
   }
   return modal;
 }
 
 export async function getAccountId(): Promise<string | null> {
-  const selector = await getSelector();
-  if (!selector.isSignedIn()) return null;
-  const accounts = await selector.store.getState().accounts;
-  return accounts[0]?.accountId ?? null;
+  try {
+    const selector = await getSelector();
+    if (!selector.isSignedIn()) return null;
+    const accounts = selector.store.getState().accounts;
+    return accounts[0]?.accountId ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function signFunctionCall(opts: {
@@ -71,7 +82,6 @@ export async function signFunctionCall(opts: {
       },
     ],
   });
-  // Wallet implementations vary on return shape
   if (result && typeof result === "object" && "transaction" in result) {
     const tx = (result as { transaction?: { hash?: string } }).transaction;
     return tx?.hash;
