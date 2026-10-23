@@ -1,5 +1,9 @@
 import { checkTransfer, DEFAULT_POLICY, ONE_NEAR, type Policy } from "./policy.ts";
-import { changeCall, viewCall } from "./near.ts";
+import {
+  changeCallViaCli,
+  credentialsExist,
+  viewCall,
+} from "./near.ts";
 
 type Proposed = { agent: string; amountNear: number; label: string };
 
@@ -37,8 +41,6 @@ function runDemo() {
 }
 
 function shouldAutoFreeze(reason: string): boolean {
-  // Only freeze on policy violations we can remediate, not on missing registration
-  // or if already frozen.
   if (reason === "Agent is frozen") return false;
   if (reason === "Agent not registered") return false;
   return reason.includes("exceeds") || reason.toLowerCase().includes("policy");
@@ -48,7 +50,6 @@ async function watchLive() {
   const contractId = process.env.GUARDIA_CONTRACT ?? "skar.testnet";
   const agentId = process.env.GUARDIA_AGENT ?? "agent.skar.testnet";
   const ownerId = process.env.GUARDIA_OWNER ?? "skar.testnet";
-  const privateKey = process.env.GUARDIA_PRIVATE_KEY;
   const autoFreeze = process.env.GUARDIA_AUTO_FREEZE !== "0";
 
   const nearEnv = process.env.GUARDIA_NEAR;
@@ -73,20 +74,21 @@ async function watchLive() {
     return;
   }
 
-  if (!privateKey) {
+  if (!credentialsExist(ownerId)) {
     console.log(
-      "\nSKIP FREEZE  set GUARDIA_PRIVATE_KEY (owner full-access key) to auto-freeze",
+      `\nSKIP FREEZE  no credentials at ~/.near-credentials/testnet/${ownerId}.json`,
     );
+    console.log("       import the account with near-cli first");
     return;
   }
 
-  console.log(`\nFREEZE  calling freeze_agent as ${ownerId}...`);
+  console.log(`\nFREEZE  freeze_agent as ${ownerId} (near CLI + legacy keychain)...`);
   try {
-    const hash = await changeCall(
+    const hash = await changeCallViaCli(
       contractId,
       "freeze_agent",
       { agent_id: agentId },
-      { ownerId, privateKey },
+      { ownerId },
     );
     console.log(`       frozen  tx ${hash}`);
 
