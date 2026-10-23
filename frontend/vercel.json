@@ -1,4 +1,10 @@
 {
   "framework": "vite",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/api/nearblocks/:path*",
+      "destination": "https://api-testnet.nearblocks.io/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

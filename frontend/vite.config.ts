@@ -6,5 +6,13 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    proxy: {
+      // Avoid browser CORS when talking to NearBlocks testnet indexer
+      "/api/nearblocks": {
+        target: "https://api-testnet.nearblocks.io",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/nearblocks/, ""),
+      },
+    },
   },
 });

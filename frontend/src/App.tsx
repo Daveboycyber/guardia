@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchContractEvents,
+  formatEventTime,
+  type ChainEvent,
+} from "./lib/events";
 import {
   checkTransfer,
   DEFAULT_AGENT,
@@ -69,6 +74,10 @@ export default function App() {
     amount: number;
   } | null>(null);
   const [stats, setStats] = useState({ allows: 0, blocks: 0 });
+  const [chainEvents, setChainEvents] = useState<ChainEvent[]>([]);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [streamLive, setStreamLive] = useState(false);
+  const seenTx = useRef(new Set<string>());
 
   const maxNear = useMemo(() => {
     if (!policy) return null;
@@ -101,11 +110,44 @@ export default function App() {
     }
   }, [contractId, agentId]);
 
+  const pullChain = useCallback(async () => {
+    try {
+      const events = await fetchContractEvents(contractId, 25);
+      setChainEvents(events);
+      setStreamLive(true);
+      setStreamError(null);
+
+      for (const ev of events) {
+        if (seenTx.current.has(ev.id)) continue;
+        seenTx.current.add(ev.id);
+        // Only announce newly seen txs after the first successful pull
+        if (seenTx.current.size > events.length) {
+          pushLog({
+            kind: "system",
+            title: `Chain · ${ev.method}`,
+            detail: `${ev.summary} · ${ev.txHash.slice(0, 10)}…`,
+          });
+        }
+      }
+      // Seed seen set on first load without flooding the decision feed
+      if (seenTx.current.size <= events.length) {
+        for (const ev of events) seenTx.current.add(ev.id);
+      }
+    } catch (e) {
+      setStreamLive(false);
+      setStreamError(e instanceof Error ? e.message : String(e));
+    }
+  }, [contractId, pushLog]);
+
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => void refresh(), 12_000);
+    void pullChain();
+    const t = setInterval(() => {
+      void refresh();
+      void pullChain();
+    }, 10_000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, pullChain]);
 
   const runCheck = useCallback(
     async (nearAmount: number, label?: string) => {
@@ -146,10 +188,10 @@ export default function App() {
       {
         id: "sync",
         label: "Sync state",
-        description: "Pull live policy and freeze status from the contract.",
+        description: "Pull live policy, freeze status, and recent chain events.",
         actionLabel: "Sync on-chain state",
         run: async () => {
-          await refresh();
+          await Promise.all([refresh(), pullChain()]);
           pushLog({
             kind: "system",
             title: "State synchronized",
@@ -179,16 +221,16 @@ export default function App() {
         id: "response",
         label: "Response",
         description:
-          "Auto-freeze runs in the watcher CLI. UI records the incident and recommends freeze.",
-        actionLabel: "Log incident response",
+          "Auto-freeze runs in the watcher CLI. Watch the chain stream for freeze_agent.",
+        actionLabel: "Refresh chain stream",
         run: async () => {
+          await pullChain();
           pushLog({
             kind: "info",
-            title: "Incident flagged for freeze",
+            title: "Awaiting freeze on chain",
             detail:
-              "Run watcher with GUARDIA_NEAR=20 for signed freeze_agent, or near CLI as owner.",
+              "Run watcher GUARDIA_NEAR=20 or near CLI freeze_agent; stream updates automatically.",
           });
-          await refresh();
         },
       },
       {
@@ -201,7 +243,7 @@ export default function App() {
         },
       },
     ],
-    [agentId, frozen, pushLog, refresh, runCheck],
+    [agentId, frozen, pullChain, pushLog, refresh, runCheck],
   );
 
   const activeStep = flowSteps[Math.min(flowIndex, flowSteps.length - 1)];
@@ -266,6 +308,14 @@ export default function App() {
           <div>
             <span>Blocks</span>
             <strong className="danger-text">{stats.blocks}</strong>
+          </div>
+        </div>
+
+        <div className="rail-section">
+          <p className="rail-label">Stream</p>
+          <div className={`stream-pill ${streamLive ? "on" : "off"}`}>
+            <span className="pulse" />
+            {streamLive ? "Indexer live" : "Indexer offline"}
           </div>
         </div>
 
@@ -469,13 +519,58 @@ export default function App() {
 
           <section className="panel feed-panel">
             <div className="panel-header">
-              <h2>Decision timeline</h2>
+              <h2>On-chain event stream</h2>
+              <button
+                type="button"
+                className="btn-ghost sm"
+                onClick={() => void pullChain()}
+              >
+                Pull now
+              </button>
+            </div>
+            {streamError && (
+              <div className="stream-error">Indexer: {streamError}</div>
+            )}
+            <div className="chain-feed">
+              {chainEvents.length === 0 ? (
+                <div className="feed-empty">
+                  Waiting for transactions to <code>{contractId}</code>. Freeze,
+                  register, and policy calls appear here within ~10s.
+                </div>
+              ) : (
+                chainEvents.map((ev) => (
+                  <article key={ev.id} className={`chain-event ${ev.status}`}>
+                    <div className="chain-meta">
+                      <span className="chain-method">{ev.method}</span>
+                      <span className="chain-time">{formatEventTime(ev.at)}</span>
+                    </div>
+                    <strong>{ev.summary}</strong>
+                    {ev.eventName && (
+                      <span className="chain-nep">NEP-297 · {ev.eventName}</span>
+                    )}
+                    <a
+                      href={ev.explorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="chain-link"
+                    >
+                      {ev.txHash.slice(0, 16)}… ↗
+                    </a>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="panel feed-panel">
+            <div className="panel-header">
+              <h2>Session decision timeline</h2>
             </div>
             <div className="feed">
               {log.length === 0 ? (
                 <div className="feed-empty">
                   Run the incident flow or a probe to stream live ALLOW / BLOCK
-                  decisions.
+                  decisions in this session.
                 </div>
               ) : (
                 log.map((item) => (
@@ -495,9 +590,9 @@ export default function App() {
         </div>
 
         <footer className="footer-note">
-          Reads hit <code>check_transfer</code> / <code>get_policy</code> on{" "}
-          <code>{contractId}</code>. Signed freeze remains on the watcher / near
-          CLI as owner.{" "}
+          Chain stream polls NearBlocks testnet for <code>{contractId}</code>{" "}
+          every 10s and parses NEP-297 <code>EVENT_JSON</code> logs when present.
+          Probes call <code>check_transfer</code> over RPC.{" "}
           <a
             href="https://github.com/Daveboycyber/guardia"
             target="_blank"

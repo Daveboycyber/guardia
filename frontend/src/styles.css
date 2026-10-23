@@ -12,7 +12,6 @@
   --danger: #ff4d4d;
   --danger-dim: rgba(255, 77, 77, 0.12);
   --warn: #ffb020;
-  --warn-dim: rgba(255, 176, 32, 0.12);
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   --sans: "IBM Plex Sans", system-ui, sans-serif;
   --radius: 14px;
@@ -144,6 +143,29 @@ body {
 .rail-section.stats strong {
   font-family: var(--mono);
   font-size: 20px;
+}
+
+.stream-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  width: fit-content;
+}
+
+.stream-pill.on {
+  background: var(--lime-dim);
+  color: var(--lime);
+  border: 1px solid rgba(204, 255, 0, 0.3);
+}
+
+.stream-pill.off {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
 }
 
 .rail-link {
@@ -560,11 +582,12 @@ button:not(:disabled):active {
   border-color: rgba(255, 77, 77, 0.35);
 }
 
-.feed {
+.feed,
+.chain-feed {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 320px;
+  max-height: 360px;
   overflow: auto;
 }
 
@@ -573,6 +596,74 @@ button:not(:disabled):active {
   color: var(--text-muted);
   font-size: 13px;
   padding: 28px 12px;
+}
+
+.stream-error {
+  margin-bottom: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #ffb4b4;
+}
+
+.chain-event {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
+.chain-event.success {
+  border-color: rgba(204, 255, 0, 0.18);
+}
+
+.chain-event.failure {
+  border-color: rgba(255, 77, 77, 0.3);
+}
+
+.chain-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chain-method {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lime);
+}
+
+.chain-time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.chain-event strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chain-nep {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.chain-link {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--lime);
+  text-decoration: none;
+  margin-top: 2px;
+}
+
+.chain-link:hover {
+  text-decoration: underline;
 }
 
 .event {
