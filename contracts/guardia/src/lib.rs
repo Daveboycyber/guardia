@@ -114,7 +114,7 @@ pub struct Contract {
 }
 
 /// Layout deployed before daily accounting existed.
-#[derive(BorshDeserialize)]
+#[derive(BorshDeserialize, BorshSerialize)]
 #[borsh(crate = "near_sdk::borsh")]
 struct PolicyV1 {
     max_single_transfer: u128,
@@ -122,7 +122,7 @@ struct PolicyV1 {
     is_frozen: bool,
 }
 
-#[derive(BorshDeserialize)]
+#[derive(BorshDeserialize, BorshSerialize)]
 #[borsh(crate = "near_sdk::borsh")]
 struct StateV1 {
     owner_id: AccountId,
