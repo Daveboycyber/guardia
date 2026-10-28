@@ -262,6 +262,9 @@ export default function App() {
   }, [refresh, pullChain]);
 
   const maxNear = policy ? yoctoToNearNumber(policy.maxSingle) : null;
+  const budgetPct =
+    policy && usage ? usagePercent(usage.spent, policy.maxDaily) : 0;
+  const budgetTone = budgetPct >= 80 ? "hot" : budgetPct >= 50 ? "warn" : "";
 
   const stats = useMemo(() => {
     const allows = decisions.filter((d) => d.allowed).length;
@@ -365,9 +368,17 @@ export default function App() {
       },
       async () => {
         await runCheck(1);
+        await ownerCall("commit_spend", {
+          agent_id: activeAgent,
+          amount: nearToYocto(1),
+        });
       },
       async () => {
         await runCheck(20);
+        await ownerCall("commit_spend", {
+          agent_id: activeAgent,
+          amount: nearToYocto(20),
+        });
       },
       async () => {
         if (accountId) {
@@ -521,7 +532,7 @@ export default function App() {
                   </button>
                 </div>
                 <ol className="playbook-steps">
-                  {["Sync", "Baseline 1 NEAR", "Attack 20 NEAR", "Freeze", "Verify"].map(
+                  {["Sync", "Commit 1 NEAR", "Attack 20 NEAR", "Freeze", "Verify"].map(
                     (label, i) => (
                       <li key={label} className={i <= flowStep ? "done" : ""}>
                         {label}
@@ -572,24 +583,18 @@ export default function App() {
                       <label>Remaining today</label>
                       <strong className="ok-text">{usage ? formatNear(usage.remaining) : "—"}</strong>
                     </div>
-                    <div
-                      className={`usage-track ${
-                        policy && usage
-                          ? usagePercent(usage.spent, policy.maxDaily) >= 80
-                            ? "hot"
-                            : usagePercent(usage.spent, policy.maxDaily) >= 50
-                              ? "warn"
-                              : ""
-                          : ""
-                      }`}
-                    >
-                      <div
-                        style={{
-                          width: `${
-                            policy && usage ? usagePercent(usage.spent, policy.maxDaily) : 0
-                          }%`,
-                        }}
-                      />
+                    <div className={`budget-needle ${budgetTone}`}>
+                      <div className="budget-needle-head">
+                        <span>Daily budget</span>
+                        <strong>{budgetPct}%</strong>
+                      </div>
+                      <div className="usage-track">
+                        <div style={{ width: `${Math.min(100, budgetPct)}%` }} />
+                        <span
+                          className="needle"
+                          style={{ left: `${Math.min(100, budgetPct)}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -639,11 +644,24 @@ export default function App() {
                   />
                   <button
                     type="button"
-                    className="btn-primary"
+                    className="btn-ghost"
                     disabled={busy}
                     onClick={() => void runCheck(Number(customNear) || 0)}
                   >
                     Check
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={busy}
+                    onClick={() =>
+                      void ownerCall("commit_spend", {
+                        agent_id: activeAgent,
+                        amount: nearToYocto(Number(customNear) || 0),
+                      })
+                    }
+                  >
+                    Commit spend
                   </button>
                 </div>
                 <div className="decision-list">
