@@ -445,48 +445,49 @@ export default function App() {
         <div className="wallet-box">
           {accountId ? (
             <>
-              <span className="rail-meta">Connected</span>
+              <p className="rail-meta">Connected</p>
               <code className="rail-code">{accountId}</code>
+              <button type="button" className="btn-ghost sm" onClick={() => void connectWallet()}>
+                Switch
+              </button>
             </>
           ) : (
-            <button type="button" className="btn-primary block" onClick={() => void connectWallet()}>
-              Connect owner wallet
+            <button type="button" className="btn-primary" onClick={() => void connectWallet()}>
+              Connect wallet
             </button>
           )}
         </div>
       </aside>
 
       <main className="main">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">AI agent treasury control · NEAR</p>
-            <h1>
-              Stop agent drains before value leaves the wallet
-            </h1>
-            <p className="hero-copy">
-              Guardia is an on-chain policy layer for autonomous payments. Limits
-              are enforced on NEAR; violations can freeze the agent until an owner
-              intervenes.
-            </p>
-          </div>
-          <div className="hero-side">
-            <div className={`status-pill ${frozen ? "frozen" : "live"}`}>
-              <span className="pulse" />
-              {loading ? "Syncing" : frozen ? "Agent frozen" : "Agent live"}
-            </div>
-            <label className="mode-toggle">
-              <input
-                type="checkbox"
-                checked={demoMode}
-                onChange={(e) => setDemoMode(e.target.checked)}
-              />
-              Guided demo hints
-            </label>
-          </div>
-        </header>
-
         {page === "overview" && (
           <>
+            <header className="page-head">
+              <div>
+                <h1>Overview</h1>
+                <p className="page-sub">
+                  Live policy surface + decision log for the active agent.
+                </p>
+              </div>
+              <div className="page-actions">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => setDemoMode((v) => !v)}
+                >
+                  {demoMode ? "Hide demo" : "Demo mode"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() => void refresh()}
+                >
+                  {loading ? "Syncing" : frozen ? "Agent frozen" : "Agent live"}
+                </button>
+              </div>
+            </header>
+
             <section className="stat-row">
               <div className="stat-card">
                 <span>Session allows</span>
@@ -615,18 +616,26 @@ export default function App() {
 
               <section className="panel">
                 <div className="panel-header">
-                  <h2>Policy check console</h2>
+                  <h2>Probe transfer</h2>
                 </div>
-                <p className="panel-copy">
-                  Evaluates a proposed transfer size against on-chain rules. This does
-                  <strong> not</strong> move funds — agents should call this before paying.
-                </p>
+                <div className="probe-row">
+                  {[0.5, 1, 5, 10, 20].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`btn-ghost probe ${riskTone(n, maxNear)}`}
+                      disabled={busy}
+                      onClick={() => void runCheck(n)}
+                    >
+                      {n} Ⓝ
+                    </button>
+                  ))}
+                </div>
                 <div className="probe-input">
                   <input
-                    type="number"
-                    min={0}
                     value={customNear}
                     onChange={(e) => setCustomNear(e.target.value)}
+                    placeholder="Custom NEAR"
                   />
                   <button
                     type="button"
@@ -634,61 +643,21 @@ export default function App() {
                     disabled={busy}
                     onClick={() => void runCheck(Number(customNear) || 0)}
                   >
-                    Evaluate
+                    Check
                   </button>
                 </div>
-                <div className={`risk-inline ${riskTone(Number(customNear) || 0, maxNear)}`}>
-                  <span>Projected risk vs limit</span>
-                  <strong>{maxNear != null ? `${maxNear} NEAR cap` : "No policy"}</strong>
-                </div>
-                <div className="quick-actions">
-                  <button type="button" className="btn-ghost" disabled={busy} onClick={() => void runCheck(1)}>
-                    1 NEAR
-                  </button>
-                  <button type="button" className="btn-ghost" disabled={busy} onClick={() => void runCheck(5)}>
-                    5 NEAR
-                  </button>
-                  <button type="button" className="btn-danger" disabled={busy} onClick={() => void runCheck(20)}>
-                    20 NEAR attack
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    disabled={busy}
-                    onClick={() =>
-                      void ownerCall("commit_spend", {
-                        agent_id: activeAgent,
-                        amount: nearToYocto(Number(customNear) || 0),
-                      })
-                    }
-                  >
-                    Commit spend
-                  </button>
-                </div>
-              </section>
-
-              <section className="panel wide">
-                <div className="panel-header">
-                  <h2>Session decisions</h2>
-                </div>
-                <div className="feed">
-                  {decisions.length === 0 ? (
-                    <div className="empty">No probes yet. Run Evaluate or the playbook.</div>
-                  ) : (
-                    decisions.map((d) => (
-                      <article key={d.id} className={`event ${d.allowed ? "allow" : "block"}`}>
-                        <div className="event-tag">{d.allowed ? "allow" : "block"}</div>
-                        <div className="event-body">
-                          <strong>
-                            {d.amount} NEAR · {d.agentId}
-                          </strong>
-                          <span>
-                            {d.at} · {d.reason}
-                          </span>
-                        </div>
-                      </article>
-                    ))
+                <div className="decision-list">
+                  {decisions.length === 0 && (
+                    <p className="empty">No probes yet — try 1 Ⓝ then 20 Ⓝ.</p>
                   )}
+                  {decisions.map((d) => (
+                    <div key={d.id} className={`decision ${d.allowed ? "ok" : "bad"}`}>
+                      <span className="decision-time">{d.at}</span>
+                      <strong>{d.allowed ? "ALLOW" : "BLOCK"}</strong>
+                      <span>{d.amount} Ⓝ</span>
+                      <span className="decision-reason">{d.reason}</span>
+                    </div>
+                  ))}
                 </div>
               </section>
             </div>
@@ -698,33 +667,41 @@ export default function App() {
         {page === "agents" && (
           <section className="panel">
             <div className="panel-header">
-              <h2>Protected agents</h2>
+              <h2>Agents</h2>
               <button type="button" className="btn-ghost sm" onClick={() => void refreshAllAgents()}>
-                Refresh all
+                Refresh table
               </button>
             </div>
-            <div className="table">
-              <div className="table-head">
+            <div className="agent-table">
+              <div className="agent-head">
                 <span>Agent</span>
                 <span>Max single</span>
+                <span>Max daily</span>
                 <span>Spent today</span>
                 <span>Status</span>
-                <span />
+                <span></span>
               </div>
               {agentRows.map((row) => (
-                <div key={row.id} className="table-row">
+                <div key={row.id} className="agent-row">
                   <code>{row.id}</code>
                   <span>
                     {row.loading
                       ? "…"
                       : row.policy
                         ? formatNear(row.policy.maxSingle)
-                        : "Not registered"}
+                        : "—"}
+                  </span>
+                  <span>
+                    {row.loading
+                      ? "…"
+                      : row.policy
+                        ? formatNear(row.policy.maxDaily)
+                        : "—"}
                   </span>
                   <span>
                     {row.loading ? "…" : row.usage ? formatNear(row.usage.spent) : "—"}
                   </span>
-                  <span className={row.policy?.frozen ? "danger-text" : "ok-text"}>
+                  <span>
                     {row.loading ? "…" : row.policy?.frozen ? "Frozen" : row.policy ? "Live" : "—"}
                   </span>
                   <button
@@ -732,8 +709,8 @@ export default function App() {
                     className="btn-ghost sm"
                     onClick={() => {
                       setActiveAgent(row.id);
+                      rememberAgent(row.id);
                       setPage("overview");
-                      pushToast("info", `Active agent → ${row.id}`);
                     }}
                   >
                     Open
@@ -741,60 +718,29 @@ export default function App() {
                 </div>
               ))}
             </div>
-
             <div className="form-block">
               <h3>Register agent</h3>
-              <p className="panel-copy">Owner-signed. Adds on-chain policy with default limits.</p>
               <div className="probe-input">
                 <input
-                  placeholder="agent-name.testnet"
                   value={registerId}
                   onChange={(e) => setRegisterId(e.target.value)}
+                  placeholder="agent.testnet"
                 />
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={busy || !registerId}
-                  onClick={async () => {
-                    await ownerCall("register_agent", { agent_id: registerId.trim() });
-                    rememberAgent(registerId.trim());
-                    const next = loadKnownAgents();
-                    setAgents(next);
-                    saveKnownAgents(next);
-                    setRegisterId("");
-                  }}
+                  disabled={busy || !registerId.trim()}
+                  onClick={() =>
+                    void ownerCall("register_agent", {
+                      agent_id: registerId.trim(),
+                      max_single: nearToYocto(Number(limitSingle) || 10),
+                      max_daily: nearToYocto(Number(limitDaily) || 50),
+                    })
+                  }
                 >
                   Register
                 </button>
               </div>
-            </div>
-
-            <div className="form-block">
-              <h3>Update limits for active agent</h3>
-              <div className="dual-input">
-                <label>
-                  Max single (NEAR)
-                  <input value={limitSingle} onChange={(e) => setLimitSingle(e.target.value)} />
-                </label>
-                <label>
-                  Max daily (NEAR)
-                  <input value={limitDaily} onChange={(e) => setLimitDaily(e.target.value)} />
-                </label>
-              </div>
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={busy}
-                onClick={() =>
-                  void ownerCall("update_policy", {
-                    agent_id: activeAgent,
-                    max_single_transfer: nearToYocto(limitSingle),
-                    max_daily_volume: nearToYocto(limitDaily),
-                  })
-                }
-              >
-                Save policy
-              </button>
             </div>
           </section>
         )}
@@ -802,69 +748,64 @@ export default function App() {
         {page === "incidents" && (
           <section className="panel">
             <div className="panel-header">
-              <h2>On-chain incidents & ops</h2>
+              <h2>Incidents & chain events</h2>
               <button type="button" className="btn-ghost sm" onClick={() => void pullChain()}>
-                Pull stream
+                Refresh stream
               </button>
             </div>
-            <p className="panel-copy">
-              Derived from indexed transactions to {contractId}. Freeze, unfreeze, register,
-              and policy updates appear here.
-            </p>
-            <div className="chain-feed">
-              {incidents.length === 0 ? (
-                <div className="empty">
-                  No management txs indexed yet. Freeze an agent to populate this feed.
-                </div>
-              ) : (
-                incidents.map((ev) => (
-                  <article key={ev.id} className={`chain-event ${ev.status}`}>
-                    <div className="chain-meta">
-                      <span className="chain-method">{ev.method}</span>
-                      <span className="chain-time">{formatEventTime(ev.at)}</span>
-                    </div>
-                    <strong>{ev.summary}</strong>
-                    {ev.eventName && (
-                      <span className="chain-nep">NEP-297 · {ev.eventName}</span>
-                    )}
-                    <a className="chain-link" href={ev.explorerUrl} target="_blank" rel="noreferrer">
-                      {ev.txHash.slice(0, 18)}… ↗
-                    </a>
-                  </article>
-                ))
+            <div className="event-list">
+              {incidents.length === 0 && (
+                <p className="empty">No freeze / policy events indexed yet.</p>
               )}
+              {incidents.map((e) => (
+                <div key={e.id} className="event-row">
+                  <span className="event-time">{formatEventTime(e.timestamp)}</span>
+                  <strong>{e.method}</strong>
+                  <code>{e.signer || e.receiver || "—"}</code>
+                </div>
+              ))}
+            </div>
+            <h3 className="subhead">Full recent stream</h3>
+            <div className="event-list">
+              {chainEvents.map((e) => (
+                <div key={e.id} className="event-row muted">
+                  <span className="event-time">{formatEventTime(e.timestamp)}</span>
+                  <span>{e.method}</span>
+                  <code>{e.signer || "—"}</code>
+                </div>
+              ))}
             </div>
           </section>
         )}
 
         {page === "integrate" && (
-          <section className="panel integrate">
-            <h2 className="page-title">Integrate Guardia into an agent</h2>
+          <section className="panel">
+            <h2 className="page-title">Integrate</h2>
             <p className="panel-copy">
-              Real use case: every autonomous payment path calls Guardia <em>before</em> moving
-              funds. If blocked, do not pay. If repeatedly blocked, the owner freeze path stops
-              further damage.
+              Call <code>check_transfer</code> before any agent spend. On BLOCK, stop the payment
+              and optionally trigger freeze via the watcher or owner wallet.
             </p>
             <div className="integrate-grid">
               <div className="integrate-card">
-                <h3>1. Check policy</h3>
-                <pre>{`near view ${contractId} check_transfer \
-  '{"agent_id":"${activeAgent}","amount":"1000000000000000000000000"}'`}</pre>
+                <h3>1. View call</h3>
+                <pre>{`near view ${contractId} check_transfer '{
+  "agent_id": "agent.testnet",
+  "amount": "1000000000000000000000000"
+}'`}</pre>
               </div>
               <div className="integrate-card">
-                <h3>2. Watcher auto-freeze</h3>
-                <pre>{`cd watcher
-GUARDIA_CONTRACT=${contractId} \
-GUARDIA_AGENT=${activeAgent} \
-GUARDIA_NEAR=20 \
-npm run live`}</pre>
+                <h3>2. Commit spend (owner path)</h3>
+                <pre>{`near call ${contractId} commit_spend '{
+  "agent_id": "agent.testnet",
+  "amount": "1000000000000000000000000"
+}' --accountId owner.testnet`}</pre>
               </div>
               <div className="integrate-card">
-                <h3>3. Agent rule</h3>
+                <h3>3. Watcher auto-freeze</h3>
                 <ul>
-                  <li>Call <code>check_transfer</code> with yocto amount as a string</li>
-                  <li>Only execute the payment if <code>allowed === true</code></li>
-                  <li>After a real payment, call <code>commit_spend</code> so the daily cap counts</li>
+                  <li>Monitors failed checks / policy violations</li>
+                  <li>Signs <code>freeze_agent</code> as owner</li>
+                  <li>Daily cap counts</li>
                   <li>On block, alert ops / wait for unfreeze</li>
                 </ul>
               </div>
