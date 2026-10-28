@@ -628,11 +628,12 @@ export default function App() {
                     <button
                       key={n}
                       type="button"
-                      className={`btn-ghost probe ${riskTone(n, maxNear)}`}
+                      className={`probe ${riskTone(n, maxNear)}`}
                       disabled={busy}
                       onClick={() => void runCheck(n)}
                     >
-                      {n} Ⓝ
+                      <span className="amt">{n}</span>
+                      <span className="unit">NEAR</span>
                     </button>
                   ))}
                 </div>
@@ -666,13 +667,13 @@ export default function App() {
                 </div>
                 <div className="decision-list">
                   {decisions.length === 0 && (
-                    <p className="empty">No probes yet — try 1 Ⓝ then 20 Ⓝ.</p>
+                    <p className="empty">No probes yet. Pick an amount, then Check or Commit.</p>
                   )}
                   {decisions.map((d) => (
                     <div key={d.id} className={`decision ${d.allowed ? "ok" : "bad"}`}>
                       <span className="decision-time">{d.at}</span>
                       <strong>{d.allowed ? "ALLOW" : "BLOCK"}</strong>
-                      <span>{d.amount} Ⓝ</span>
+                      <span className="decision-amt">{d.amount} NEAR</span>
                       <span className="decision-reason">{d.reason}</span>
                     </div>
                   ))}
