@@ -16,16 +16,22 @@ import {
   checkTransfer,
   formatNear,
   getPolicy,
+  getUsage,
   isFrozen,
+  listAgents,
   nearToYocto,
+  usagePercent,
   type PolicyView,
+  type UsageView,
   yoctoToNearNumber,
 } from "./lib/near";
 import { pushToast, subscribeToasts, type Toast } from "./lib/toast";
 import {
+  clearPendingTx,
   getAccountId,
   getModal,
   getSelector,
+  loadPendingTx,
   signFunctionCall,
 } from "./lib/wallet";
 
@@ -43,6 +49,7 @@ type SessionDecision = {
 type AgentRow = {
   id: string;
   policy: PolicyView;
+  usage: UsageView;
   loading: boolean;
 };
 
@@ -72,6 +79,7 @@ export default function App() {
   const [agents, setAgents] = useState<string[]>(loadKnownAgents);
   const [agentRows, setAgentRows] = useState<AgentRow[]>([]);
   const [policy, setPolicy] = useState<PolicyView>(null);
+  const [usage, setUsage] = useState<UsageView>(null);
   const [frozen, setFrozen] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -117,39 +125,75 @@ export default function App() {
     [contractId],
   );
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { policy: p, frozen: f } = await refreshAgent(activeAgent);
-      setPolicy(p);
-      setFrozen(f);
-      if (p) {
-        const s = yoctoToNearNumber(p.maxSingle);
-        const d = yoctoToNearNumber(p.maxDaily);
-        if (s != null) setLimitSingle(String(s));
-        if (d != null) setLimitDaily(String(d));
+  const refresh = useCallback(
+    async (opts?: { quiet?: boolean }) => {
+      const quiet = opts?.quiet === true;
+      if (!quiet) setLoading(true);
+      try {
+        const [snap, u, chainAgents] = await Promise.all([
+          refreshAgent(activeAgent),
+          getUsage(contractId, activeAgent),
+          listAgents(contractId).catch(() => [] as string[]),
+        ]);
+        setPolicy(snap.policy);
+        setFrozen(snap.frozen);
+        setUsage(u);
+        if (snap.policy) {
+          const s = yoctoToNearNumber(snap.policy.maxSingle);
+          const d = yoctoToNearNumber(snap.policy.maxDaily);
+          if (s != null) setLimitSingle(String(s));
+          if (d != null) setLimitDaily(String(d));
+        }
+        if (chainAgents.length) {
+          const known = loadKnownAgents();
+          // Only update agents state when the set actually changed (prevents effect churn)
+          const merged = Array.from(new Set([...chainAgents, ...known]));
+          const prev = new Set(known);
+          const changed =
+            merged.length !== prev.size || merged.some((id) => !prev.has(id));
+          if (changed) {
+            setAgents(merged);
+            saveKnownAgents(merged);
+          }
+        }
+      } catch (e) {
+        if (!quiet) {
+          pushToast("err", e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!quiet) setLoading(false);
       }
-    } catch (e) {
-      pushToast("err", e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeAgent, refreshAgent]);
+    },
+    [activeAgent, contractId, refreshAgent],
+  );
 
   const refreshAllAgents = useCallback(async () => {
-    const rows: AgentRow[] = agents.map((id) => ({
-      id,
-      policy: null,
-      loading: true,
-    }));
-    setAgentRows(rows);
+    // Snapshot current agents so we don't fight concurrent setAgents from refresh()
+    const ids = agents;
+    if (!ids.length) {
+      setAgentRows([]);
+      return;
+    }
+    setAgentRows((prev) => {
+      // Keep previous data while loading to avoid row flicker
+      const map = new Map(prev.map((r) => [r.id, r]));
+      return ids.map((id) => {
+        const existing = map.get(id);
+        return existing
+          ? { ...existing, loading: true }
+          : { id, policy: null, usage: null, loading: true };
+      });
+    });
     const settled = await Promise.all(
-      agents.map(async (id) => {
+      ids.map(async (id) => {
         try {
-          const p = await getPolicy(contractId, id);
-          return { id, policy: p, loading: false } satisfies AgentRow;
+          const [p, u] = await Promise.all([
+            getPolicy(contractId, id),
+            getUsage(contractId, id),
+          ]);
+          return { id, policy: p, usage: u, loading: false } satisfies AgentRow;
         } catch {
-          return { id, policy: null, loading: false } satisfies AgentRow;
+          return { id, policy: null, usage: null, loading: false } satisfies AgentRow;
         }
       }),
     );
@@ -166,16 +210,56 @@ export default function App() {
     }
   }, [contractId]);
 
+  // Clear surface when switching agent so we never flash the previous agent's limits
+  useEffect(() => {
+    setPolicy(null);
+    setUsage(null);
+    setFrozen(null);
+  }, [activeAgent]);
+
+  // Initial + activeAgent/contract change: full load once
   useEffect(() => {
     void refresh();
     void pullChain();
-    void refreshAllAgents();
+  }, [refresh, pullChain]);
+
+  // Poll quietly — never flips loading, so Policy Surface stays stable
+  useEffect(() => {
     const t = setInterval(() => {
-      void refresh();
+      void refresh({ quiet: true });
       void pullChain();
-    }, 12_000);
+    }, 20_000);
     return () => clearInterval(t);
-  }, [refresh, pullChain, refreshAllAgents]);
+  }, [refresh, pullChain]);
+
+  // Agents table only when the list itself changes (not on every quiet refresh)
+  useEffect(() => {
+    void refreshAllAgents();
+  }, [agents, contractId]); // intentionally not refreshAllAgents — avoid identity churn
+
+  useEffect(() => {
+    const pending = loadPendingTx();
+    if (!pending || Date.now() - pending.at > 15 * 60_000) {
+      if (pending) clearPendingTx();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await new Promise((r) => setTimeout(r, 1200));
+      if (cancelled) return;
+      try {
+        await refresh({ quiet: true });
+        await pullChain();
+        clearPendingTx();
+        pushToast("ok", `${pending.method} confirmed (wallet return)`);
+      } catch {
+        /* keep pending */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh, pullChain]);
 
   const maxNear = policy ? yoctoToNearNumber(policy.maxSingle) : null;
 
@@ -237,14 +321,36 @@ export default function App() {
   }
 
   async function ownerCall(method: string, args: Record<string, unknown>) {
+    if (!accountId) {
+      pushToast("info", "Connect skar.testnet first, then retry");
+      await connectWallet();
+      return;
+    }
     setBusy(true);
     try {
-      const hash = await signFunctionCall({ contractId, method, args });
-      pushToast("ok", `${method} submitted${hash ? ` · ${hash.slice(0, 10)}…` : ""}`);
-      await new Promise((r) => setTimeout(r, 1500));
-      await Promise.all([refresh(), pullChain(), refreshAllAgents()]);
+      const hash = await signFunctionCall({
+        contractId,
+        method,
+        args,
+        gas: "50000000000000",
+      });
+      pushToast(
+        "ok",
+        `${method} submitted${hash ? ` · ${hash.slice(0, 10)}…` : ""}`,
+      );
+      await new Promise((r) => setTimeout(r, 2000));
+      await Promise.all([
+        refresh({ quiet: true }),
+        pullChain(),
+        refreshAllAgents(),
+      ]);
     } catch (e) {
-      pushToast("err", e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/redirected to sign|wallet return/i.test(msg)) {
+        pushToast("info", msg);
+      } else {
+        pushToast("err", msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -433,7 +539,8 @@ export default function App() {
                     Refresh
                   </button>
                 </div>
-                {loading ? (
+                {/* Only skeleton on true first load — never blank the tile on quiet/poll refreshes */}
+                {loading && !policy && !usage ? (
                   <div className="skeleton-grid">
                     <div className="skeleton" />
                     <div className="skeleton" />
@@ -441,7 +548,7 @@ export default function App() {
                     <div className="skeleton" />
                   </div>
                 ) : (
-                  <div className="metric-grid">
+                  <div className={`metric-grid${loading ? " is-refreshing" : ""}`}>
                     <div className="metric">
                       <label>Max single</label>
                       <strong>{policy ? formatNear(policy.maxSingle) : "Unregistered"}</strong>
@@ -453,12 +560,35 @@ export default function App() {
                     <div className="metric">
                       <label>Freeze</label>
                       <strong className={frozen ? "danger-text" : "ok-text"}>
-                        {frozen ? "TRUE" : "FALSE"}
+                        {frozen == null ? "…" : frozen ? "TRUE" : "FALSE"}
                       </strong>
                     </div>
                     <div className="metric">
-                      <label>Agent</label>
-                      <strong className="small-mono">{activeAgent}</strong>
+                      <label>Spent today</label>
+                      <strong>{usage ? formatNear(usage.spent) : "—"}</strong>
+                    </div>
+                    <div className="metric">
+                      <label>Remaining today</label>
+                      <strong className="ok-text">{usage ? formatNear(usage.remaining) : "—"}</strong>
+                    </div>
+                    <div
+                      className={`usage-track ${
+                        policy && usage
+                          ? usagePercent(usage.spent, policy.maxDaily) >= 80
+                            ? "hot"
+                            : usagePercent(usage.spent, policy.maxDaily) >= 50
+                              ? "warn"
+                              : ""
+                          : ""
+                      }`}
+                    >
+                      <div
+                        style={{
+                          width: `${
+                            policy && usage ? usagePercent(usage.spent, policy.maxDaily) : 0
+                          }%`,
+                        }}
+                      />
                     </div>
                   </div>
                 )}
@@ -521,6 +651,19 @@ export default function App() {
                   <button type="button" className="btn-danger" disabled={busy} onClick={() => void runCheck(20)}>
                     20 NEAR attack
                   </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={busy}
+                    onClick={() =>
+                      void ownerCall("commit_spend", {
+                        agent_id: activeAgent,
+                        amount: nearToYocto(Number(customNear) || 0),
+                      })
+                    }
+                  >
+                    Commit spend
+                  </button>
                 </div>
               </section>
 
@@ -564,6 +707,7 @@ export default function App() {
               <div className="table-head">
                 <span>Agent</span>
                 <span>Max single</span>
+                <span>Spent today</span>
                 <span>Status</span>
                 <span />
               </div>
@@ -576,6 +720,9 @@ export default function App() {
                       : row.policy
                         ? formatNear(row.policy.maxSingle)
                         : "Not registered"}
+                  </span>
+                  <span>
+                    {row.loading ? "…" : row.usage ? formatNear(row.usage.spent) : "—"}
                   </span>
                   <span className={row.policy?.frozen ? "danger-text" : "ok-text"}>
                     {row.loading ? "…" : row.policy?.frozen ? "Frozen" : row.policy ? "Live" : "—"}
@@ -717,6 +864,7 @@ npm run live`}</pre>
                 <ul>
                   <li>Call <code>check_transfer</code> with yocto amount as a string</li>
                   <li>Only execute the payment if <code>allowed === true</code></li>
+                  <li>After a real payment, call <code>commit_spend</code> so the daily cap counts</li>
                   <li>On block, alert ops / wait for unfreeze</li>
                 </ul>
               </div>
@@ -758,8 +906,10 @@ npm run live`}</pre>
               </div>
             </div>
             <div className="form-block">
-              <h3>Known agents (local)</h3>
-              <p className="panel-copy">Stored in this browser. Used by the Agents page.</p>
+              <h3>Agents</h3>
+              <p className="panel-copy">
+                Loaded from on-chain <code>list_agents</code>, then cached in this browser.
+              </p>
               <pre>{JSON.stringify(agents, null, 2)}</pre>
             </div>
             <div className="form-block">
