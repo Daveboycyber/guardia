@@ -778,7 +778,7 @@ export default function App() {
               )}
               {incidents.map((e) => (
                 <div key={e.id} className="event-row">
-                  <span className="event-time">{formatEventTime(e.timestamp)}</span>
+                  <span className="event-time">{formatEventTime(e.at)}</span>
                   <strong>{e.method}</strong>
                   <code>{e.signer || e.receiver || "—"}</code>
                 </div>
@@ -788,7 +788,7 @@ export default function App() {
             <div className="event-list">
               {chainEvents.map((e) => (
                 <div key={e.id} className="event-row muted">
-                  <span className="event-time">{formatEventTime(e.timestamp)}</span>
+                  <span className="event-time">{formatEventTime(e.at)}</span>
                   <span>{e.method}</span>
                   <code>{e.signer || "—"}</code>
                 </div>
