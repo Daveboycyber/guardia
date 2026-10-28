@@ -41,7 +41,7 @@ function stashPendingTx(method: string) {
   }
 }
 
-/** Same-origin RPC so wallet-selector / near-api-js never hit public endpoints from the browser. */
+/** Same-origin RPC so wallet-selector never hits public endpoints from the browser. */
 function walletNodeUrl(): string {
   return getRpcUrl();
 }
@@ -113,4 +113,34 @@ export async function signFunctionCall(opts: {
   stashPendingTx(opts.method);
 
   const wallet = await selector.wallet();
- 
+  try {
+    const result = await wallet.signAndSendTransaction({
+      receiverId: opts.contractId,
+      actions: [
+        {
+          type: "FunctionCall",
+          params: {
+            methodName: opts.method,
+            args: opts.args,
+            gas: opts.gas ?? "30000000000000",
+            deposit: "0",
+          },
+        },
+      ],
+    });
+    clearPendingTx();
+    if (result && typeof result === "object" && "transaction" in result) {
+      const tx = (result as { transaction?: { hash?: string } }).transaction;
+      return tx?.hash;
+    }
+    if (typeof result === "string") return result;
+    return undefined;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/redirect|popup|user rejected|cancelled/i.test(msg)) {
+      throw new Error("Redirected to sign — return to this tab after approving");
+    }
+    clearPendingTx();
+    throw e;
+  }
+}
