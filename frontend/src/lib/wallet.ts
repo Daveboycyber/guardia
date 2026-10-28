@@ -1,6 +1,6 @@
 import type { WalletSelector } from "@near-wallet-selector/core";
 import type { WalletSelectorModal } from "@near-wallet-selector/modal-ui";
-import { NETWORK_ID, RPC_URL } from "./config";
+import { NETWORK_ID, getRpcUrl } from "./config";
 
 let selectorPromise: Promise<WalletSelector> | null = null;
 let modal: WalletSelectorModal | null = null;
@@ -41,6 +41,11 @@ function stashPendingTx(method: string) {
   }
 }
 
+/** Same-origin RPC so wallet-selector / near-api-js never hit public endpoints from the browser. */
+function walletNodeUrl(): string {
+  return getRpcUrl();
+}
+
 export async function getSelector(): Promise<WalletSelector> {
   if (!selectorPromise) {
     selectorPromise = (async () => {
@@ -48,10 +53,11 @@ export async function getSelector(): Promise<WalletSelector> {
       const { setupMyNearWallet } = await import(
         "@near-wallet-selector/my-near-wallet"
       );
+      const nodeUrl = walletNodeUrl();
       return setupWalletSelector({
         network: {
           networkId: NETWORK_ID,
-          nodeUrl: RPC_URL,
+          nodeUrl,
           helperUrl: "https://helper.testnet.near.org",
           explorerUrl: "https://explorer.testnet.near.org",
           indexerUrl: "https://api-testnet.nearblocks.io",
@@ -104,39 +110,7 @@ export async function signFunctionCall(opts: {
     throw new Error("Connect a wallet first (owner account)");
   }
 
-  // MyNearWallet often redirects; stash so we can recover on return
   stashPendingTx(opts.method);
 
   const wallet = await selector.wallet();
-  try {
-    const result = await wallet.signAndSendTransaction({
-      receiverId: opts.contractId,
-      actions: [
-        {
-          type: "FunctionCall",
-          params: {
-            methodName: opts.method,
-            args: opts.args,
-            gas: opts.gas ?? "30000000000000",
-            deposit: "0",
-          },
-        },
-      ],
-    });
-    clearPendingTx();
-    if (result && typeof result === "object" && "transaction" in result) {
-      const tx = (result as { transaction?: { hash?: string } }).transaction;
-      return tx?.hash;
-    }
-    if (typeof result === "string") return result;
-    return undefined;
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    // Redirect-style wallets abort the promise; leave the pending stash
-    if (/redirect|popup|user rejected|cancelled/i.test(msg)) {
-      throw new Error("Redirected to sign — return to this tab after approving");
-    }
-    clearPendingTx();
-    throw e;
-  }
-}
+ 

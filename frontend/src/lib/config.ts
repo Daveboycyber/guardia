@@ -1,9 +1,21 @@
 export const DEFAULT_CONTRACT = "skar.testnet";
 export const DEFAULT_AGENT = "agent.skar.testnet";
 export const NETWORK_ID = "testnet";
-export const RPC_URL =
-  import.meta.env.VITE_NEAR_RPC ?? "https://rpc.testnet.fastnear.com";
 export const ONE_NEAR = 10n ** 24n;
+
+/** Prefer same-origin proxy in the browser to avoid RPC rate-limits / CORS. */
+export function getRpcUrl(): string {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/api/near-rpc`;
+  }
+  return import.meta.env.VITE_NEAR_RPC ?? "https://rpc.testnet.fastnear.com";
+}
+
+/** Legacy constant — prefer getRpcUrl() for new code. */
+export const RPC_URL =
+  typeof window !== "undefined"
+    ? `${window.location.origin}/api/near-rpc`
+    : (import.meta.env.VITE_NEAR_RPC ?? "https://rpc.testnet.fastnear.com");
 
 const AGENTS_KEY = "guardia.knownAgents";
 const CONTRACT_KEY = "guardia.contractId";

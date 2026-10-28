@@ -2,9 +2,16 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/api/near-rpc",
+      "destination": "https://rpc.testnet.fastnear.com/"
+    },
+    {
       "source": "/api/nearblocks/:path*",
       "destination": "https://api-testnet.nearblocks.io/:path*"
     },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }
