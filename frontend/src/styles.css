@@ -610,3 +610,35 @@ pre {
   font-size: 11px;
   overflow: auto;
 }
+
+.budget-needle {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+.budget-needle-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.budget-needle-head strong {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--lime);
+}
+.budget-needle.hot .budget-needle-head strong { color: var(--danger); }
+.budget-needle.warn .budget-needle-head strong { color: var(--warn); }
+.usage-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: #1c1c1c;
+  border: 1px solid var(--border);
+}
+.usage-track > div {
+  height: 100
