@@ -6,6 +6,12 @@ export type PolicyView = {
   frozen: boolean;
 } | null;
 
+export type UsageView = {
+  spent: string;
+  remaining: string;
+  epochDay: string;
+} | null;
+
 async function viewCall<T>(
   contractId: string,
   method: string,
@@ -52,11 +58,28 @@ export async function getPolicy(
   return { maxSingle: raw[0], maxDaily: raw[1], frozen: raw[2] };
 }
 
+export async function getUsage(
+  contractId: string,
+  agentId: string,
+): Promise<UsageView> {
+  const raw = await viewCall<[string, string, string] | null>(
+    contractId,
+    "get_usage",
+    { agent_id: agentId },
+  );
+  if (!raw) return null;
+  return { spent: raw[0], remaining: raw[1], epochDay: raw[2] };
+}
+
 export async function isFrozen(
   contractId: string,
   agentId: string,
 ): Promise<boolean> {
   return viewCall<boolean>(contractId, "is_frozen", { agent_id: agentId });
+}
+
+export async function listAgents(contractId: string): Promise<string[]> {
+  return viewCall<string[]>(contractId, "list_agents", {});
 }
 
 export async function checkTransfer(
@@ -95,5 +118,16 @@ export function yoctoToNearNumber(yocto: string): number | null {
     return Number(BigInt(yocto) / ONE_NEAR);
   } catch {
     return null;
+  }
+}
+
+export function usagePercent(spentYocto: string, maxDailyYocto: string): number {
+  try {
+    const spent = BigInt(spentYocto);
+    const max = BigInt(maxDailyYocto);
+    if (max === 0n) return 0;
+    return Number((spent * 100n) / max);
+  } catch {
+    return 0;
   }
 }
