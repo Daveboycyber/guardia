@@ -641,7 +641,11 @@ pre {
   border: 1px solid var(--border);
 }
 .usage-track > div {
-  height: 100
+  height: 100%;
+  border-radius: inherit;
+  background: var(--lime);
+  width: 0;
+}
 .page-head {
   display: flex;
   justify-content: space-between;
