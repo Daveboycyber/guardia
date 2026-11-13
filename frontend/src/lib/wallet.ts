@@ -41,9 +41,18 @@ function stashPendingTx(method: string) {
   }
 }
 
-/** Same-origin RPC so wallet-selector never hits public endpoints from the browser. */
 function walletNodeUrl(): string {
   return getRpcUrl();
+}
+
+function rewriteWalletError(msg: string): string {
+  if (/keyType/i.test(msg) && /enum schema|ed25519Key|secp256k1Key/i.test(msg)) {
+    return (
+      "Wallet hit a post-quantum (ml-dsa-65) key the browser library cannot decode. " +
+      "Use MyNearWallet with a classic ed25519 account, or run freeze/unfreeze via near CLI."
+    );
+  }
+  return msg;
 }
 
 export async function getSelector(): Promise<WalletSelector> {
@@ -63,9 +72,6 @@ export async function getSelector(): Promise<WalletSelector> {
       const { setupHotWallet } = await import(
         "@near-wallet-selector/hot-wallet"
       );
-      const { setupNearMobileWallet } = await import(
-        "@near-wallet-selector/near-mobile-wallet"
-      );
 
       const nodeUrl = walletNodeUrl();
       return setupWalletSelector({
@@ -76,6 +82,7 @@ export async function getSelector(): Promise<WalletSelector> {
           explorerUrl: "https://explorer.testnet.near.org",
           indexerUrl: "https://api-testnet.nearblocks.io",
         },
+        // Near Mobile ships ML-DSA vaults that older selector/near-api-js cannot decode.
         modules: [
           setupMyNearWallet({
             walletUrl: "https://testnet.mynearwallet.com",
@@ -84,7 +91,6 @@ export async function getSelector(): Promise<WalletSelector> {
           setupHereWallet(),
           setupNightly(),
           setupHotWallet(),
-          setupNearMobileWallet(),
         ],
       });
     })();
@@ -99,7 +105,7 @@ export async function getModal(): Promise<WalletSelectorModal> {
     modal = setupModal(selector, {
       contractId: "skar.testnet",
       description:
-        "Connect the Guardia owner account to freeze, unfreeze, and manage agents.",
+        "Connect the Guardia owner account (ed25519) to freeze, unfreeze, and manage agents.",
     });
   }
   return modal;
@@ -155,11 +161,11 @@ export async function signFunctionCall(opts: {
     if (typeof result === "string") return result;
     return undefined;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/redirect|popup|user rejected|cancelled/i.test(msg)) {
+    const raw = e instanceof Error ? e.message : String(e);
+    if (/redirect|popup|user rejected|cancelled/i.test(raw)) {
       throw new Error("Redirected to sign — return to this tab after approving");
     }
     clearPendingTx();
-    throw e;
+    throw new Error(rewriteWalletError(raw));
   }
 }
