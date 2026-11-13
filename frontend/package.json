@@ -1,7 +1,7 @@
 {
   "name": "guardia-frontend",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,8 +10,13 @@
   },
   "dependencies": {
     "@near-wallet-selector/core": "^8.9.13",
+    "@near-wallet-selector/here-wallet": "^8.9.13",
+    "@near-wallet-selector/hot-wallet": "^8.9.13",
+    "@near-wallet-selector/meteor-wallet": "^8.9.13",
     "@near-wallet-selector/modal-ui": "^8.9.13",
     "@near-wallet-selector/my-near-wallet": "^8.9.13",
+    "@near-wallet-selector/near-mobile-wallet": "^8.9.13",
+    "@near-wallet-selector/nightly": "^8.9.13",
     "buffer": "^6.0.3",
     "near-api-js": "^4.0.3",
     "process": "^0.11.10",
