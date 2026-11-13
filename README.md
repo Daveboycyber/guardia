@@ -1,62 +1,114 @@
 # Guardia
 
-**Real-time scam & anomaly detector for agent-to-agent money flows on NEAR.**
+**Real-time policy engine for agent-to-agent money flows on NEAR.**
 
-AI Security for the Agent Economy — built for the [NEAR Hackathon 2026](https://nearhackathon.com).
+AI Security for the Agent Economy — [NEAR Hackathon 2026](https://nearhackathon.com).
 
 > Give AI agents money without giving them the keys to everything.
 
-## Vision
+## What it is
 
-Guardia is an on-chain policy engine + watcher that monitors transfers between AI agents, scores them for scam / anomaly risk, and can freeze suspicious flows before the money leaves.
+Guardia is:
 
-### Core features (MVP)
-- Registry of protected agent accounts
-- Single-transfer limit and frozen flag
-- `check_transfer` view used by the watcher
-- NEP-297 events for register / freeze / unfreeze / policy updates
-- TypeScript watcher with a local demo of the same rules
+1. **On-chain policy** — register agents, single-transfer + daily limits, freeze, preview (`check_transfer`) and record spend (`commit_spend`)
+2. **Dashboard** — React console for policy surface, probes, commit spend, freeze, agents, incidents
+3. **Watcher** — TypeScript CLI that mirrors policy offline, or hits testnet and can auto-freeze on breach
 
-### Tracks
-- Primary: **AI Security & Defense**
-- Also relevant: Agent Economy, Autonomous Business
+**Primary track:** AI Security & Defense  
+**Also fits:** Agent Economy, Autonomous Business
 
-## Project structure
+## Live targets (testnet)
+
+| Item | Value |
+|------|--------|
+| Contract | `skar.testnet` |
+| Agent | `agent.skar.testnet` |
+| Owner | `skar.testnet` |
+| Default limits | 10 NEAR single · 50 NEAR daily |
+| Dashboard | Vercel project built from `frontend/` |
+
+## Repository
 
 ```
 guardia/
-├── contracts/guardia/   # Rust policy engine
-├── watcher/             # TypeScript watcher + local demo
+├── contracts/guardia/   # Rust near-sdk policy engine
+├── frontend/            # React + Vite dashboard
+├── watcher/             # TypeScript demo + live auto-freeze CLI
 └── README.md
 ```
 
-## Contract
+## Quick demo (dashboard)
 
-### Build
+1. Open the deployed dashboard (or `cd frontend && npm i && npm run dev`).
+2. Unfreeze the agent if a prior run left it frozen.
+3. **Check 1 NEAR** → ALLOW. **Commit spend** (owner wallet) → Spent today moves.
+4. **Check / commit 20 NEAR** → BLOCK (over single limit).
+5. **Freeze** → **Check 1 NEAR** → BLOCK (`Agent is frozen`).
+
+`check_transfer` is a **view** (preview only). **`commit_spend`** is what consumes the daily budget.
+
+## Frontend
 
 ```bash
-cd contracts/guardia
-cargo near build non-reproducible-wasm
+cd frontend
+npm install
+npm run dev
 ```
 
-WASM lands at `target/near/guardia.wasm`.
+- Wallet: MyNearWallet via `@near-wallet-selector`
+- Browser RPC: same-origin `/api/near-rpc` → FastNear (see `vercel.json`) — avoids public RPC rate limits
+- Events: `/api/nearblocks` proxy to Nearblocks testnet API
 
-### Test
+Vercel: set **Root Directory** to `frontend`.
+
+## Watcher
+
+```bash
+cd watcher
+npm install
+npm run demo          # offline policy mirror
+```
+
+Live check + optional auto-freeze (needs `near` CLI + `~/.near-credentials/testnet/skar.testnet.json`):
+
+```bash
+GUARDIA_CONTRACT=skar.testnet \
+GUARDIA_AGENT=agent.skar.testnet \
+GUARDIA_OWNER=skar.testnet \
+GUARDIA_NEAR=20 \
+npm run live
+```
+
+`GUARDIA_AUTO_FREEZE=0` reports only. This is a **one-shot** process, not a long-running daemon.
+
+Details: [watcher/README.md](watcher/README.md).
+
+## Contract
 
 ```bash
 cd contracts/guardia
 cargo test
+cargo near build non-reproducible-wasm
 ```
 
-### Deploy to testnet
+WASM: `target/near/guardia.wasm`.
 
-1. Create a testnet account (for example with [MyNearWallet testnet](https://testnet.mynearwallet.com)) and make sure `near-cli-rs` can sign for it (`near account import-account` using the seed phrase, or create the account with the CLI).
-2. From `contracts/guardia`, deploy and init in one step. Replace both account ids with yours (owner is usually the same account you deploy to):
+### Important methods
+
+| Method | Who | Effect |
+|--------|-----|--------|
+| `register_agent` | owner | Create default policy |
+| `check_transfer` | anyone (view) | Preview allow/block — **no state write** |
+| `commit_spend` | owner or agent | Count amount toward daily cap |
+| `freeze_agent` / `unfreeze_agent` | owner | Kill switch |
+| `get_policy` / `get_usage` / `list_agents` | view | Dashboard data |
+
+Deploy / register examples (replace accounts as needed):
 
 ```bash
-cargo near deploy YOUR_ACCOUNT.testnet \
+cargo near deploy skar.testnet \
   with-init-call new \
-  json-args '{"owner_id":"YOUR_ACCOUNT.testnet"}' \
+  json-args '{"owner_id":"skar.testnet"}' \
   prepaid-gas '100.0 Tgas' \
   attached-deposit '0 NEAR' \
   network-config testnet \
@@ -64,43 +116,18 @@ cargo near deploy YOUR_ACCOUNT.testnet \
   send
 ```
 
-If the CLI asks you to pick a key, choose the full-access key for `YOUR_ACCOUNT.testnet`.
+## Status (MVP)
 
-3. Register an agent (from any shell with near-cli-rs):
+- Contract: deployed testnet, unit tests in-repo
+- Dashboard: deployed, policy surface + probes + commit + freeze
+- Watcher: demo + live auto-freeze path
+- Gaps: watcher is not continuous; incident stream depends on indexer coverage
 
-```bash
-near contract call-function as-transaction YOUR_ACCOUNT.testnet register_agent \
-  json-args '{"agent_id":"agent.YOUR_ACCOUNT.testnet"}' \
-  prepaid-gas '30.0 Tgas' \
-  attached-deposit '0 NEAR' \
-  sign-as YOUR_ACCOUNT.testnet \
-  network-config testnet \
-  sign-with-keychain \
-  send
-```
+## Hackathon submission
 
-4. Ask the contract whether a 1 NEAR transfer is allowed:
-
-```bash
-near contract call-function as-read-only YOUR_ACCOUNT.testnet check_transfer \
-  json-args '{"agent_id":"agent.YOUR_ACCOUNT.testnet","amount":"1000000000000000000000000"}' \
-  network-config testnet \
-  now
-```
-
-## Watcher
-
-```bash
-cd watcher
-npm install
-npm run demo
-```
-
-See [watcher/README.md](watcher/README.md) for the live RPC mode.
-
-## Status
-
-Contract builds. Unit tests and a local watcher demo are in the repo. Testnet deploy is the next command you run locally (keys stay on your machine).
+- **Deadline:** 14 Nov 2026, 23:59 UTC
+- Public repo + demo post on X (`@NEARProtocol`, `#NEARHackathon`) + form on [nearhackathon.com](https://nearhackathon.com)
+- Submission is one-shot (changes via request-changes only)
 
 ## License
 
