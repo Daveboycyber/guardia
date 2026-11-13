@@ -421,7 +421,6 @@ export default function App() {
           <div>
             <strong>Guardia</strong>
             <span>Agent money defense</span>
-            <span className="ui-version">ui · 0.3 polish</span>
           </div>
         </div>
 
