@@ -53,6 +53,20 @@ export async function getSelector(): Promise<WalletSelector> {
       const { setupMyNearWallet } = await import(
         "@near-wallet-selector/my-near-wallet"
       );
+      const { setupMeteorWallet } = await import(
+        "@near-wallet-selector/meteor-wallet"
+      );
+      const { setupHereWallet } = await import(
+        "@near-wallet-selector/here-wallet"
+      );
+      const { setupNightly } = await import("@near-wallet-selector/nightly");
+      const { setupHotWallet } = await import(
+        "@near-wallet-selector/hot-wallet"
+      );
+      const { setupNearMobileWallet } = await import(
+        "@near-wallet-selector/near-mobile-wallet"
+      );
+
       const nodeUrl = walletNodeUrl();
       return setupWalletSelector({
         network: {
@@ -66,6 +80,11 @@ export async function getSelector(): Promise<WalletSelector> {
           setupMyNearWallet({
             walletUrl: "https://testnet.mynearwallet.com",
           }),
+          setupMeteorWallet(),
+          setupHereWallet(),
+          setupNightly(),
+          setupHotWallet(),
+          setupNearMobileWallet(),
         ],
       });
     })();
