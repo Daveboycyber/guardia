@@ -1,7 +1,7 @@
 {
   "name": "guardia-frontend",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,16 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@near-wallet-selector/core": "^8.9.13",
-    "@near-wallet-selector/here-wallet": "^8.9.13",
-    "@near-wallet-selector/hot-wallet": "^8.9.13",
-    "@near-wallet-selector/meteor-wallet": "^8.9.13",
-    "@near-wallet-selector/modal-ui": "^8.9.13",
-    "@near-wallet-selector/my-near-wallet": "^8.9.13",
-    "@near-wallet-selector/near-mobile-wallet": "^8.9.13",
-    "@near-wallet-selector/nightly": "^8.9.13",
+    "@near-wallet-selector/core": "9.5.4",
+    "@near-wallet-selector/here-wallet": "9.5.4",
+    "@near-wallet-selector/hot-wallet": "9.5.4",
+    "@near-wallet-selector/meteor-wallet": "9.5.4",
+    "@near-wallet-selector/modal-ui": "9.5.4",
+    "@near-wallet-selector/nightly": "9.5.4",
     "buffer": "^6.0.3",
-    "near-api-js": "^4.0.3",
+    "near-api-js": "5.1.1",
     "process": "^0.11.10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -30,5 +28,8 @@
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
     "vite-plugin-node-polyfills": "^0.22.0"
+  },
+  "overrides": {
+    "near-api-js": "5.1.1"
   }
 }

@@ -46,10 +46,17 @@ function walletNodeUrl(): string {
 }
 
 function rewriteWalletError(msg: string): string {
-  if (/keyType/i.test(msg) && /enum schema|ed25519Key|secp256k1Key/i.test(msg)) {
+  if (/keyType/i.test(msg) && /enum schema|ed25519Key|secp256k1Key|ml-dsa/i.test(msg)) {
     return (
-      "Wallet hit a post-quantum (ml-dsa-65) key the browser library cannot decode. " +
-      "Use MyNearWallet with a classic ed25519 account, or run freeze/unfreeze via near CLI."
+      "Wallet library could not decode a key on this account. " +
+      "Use Meteor Wallet (browser extension) with the full-access ed25519 key for skar.testnet, " +
+      "or sign freeze / unfreeze / commit via near CLI."
+    );
+  }
+  if (/access key .+ doesn't exist/i.test(msg)) {
+    return (
+      "This wallet does not control that access key. " +
+      "Disconnect, connect Meteor with skar.testnet, and approve the request with a full-access key."
     );
   }
   return msg;
@@ -59,9 +66,6 @@ export async function getSelector(): Promise<WalletSelector> {
   if (!selectorPromise) {
     selectorPromise = (async () => {
       const { setupWalletSelector } = await import("@near-wallet-selector/core");
-      const { setupMyNearWallet } = await import(
-        "@near-wallet-selector/my-near-wallet"
-      );
       const { setupMeteorWallet } = await import(
         "@near-wallet-selector/meteor-wallet"
       );
@@ -82,15 +86,13 @@ export async function getSelector(): Promise<WalletSelector> {
           explorerUrl: "https://testnet.nearblocks.io",
           indexerUrl: "https://api-testnet.nearblocks.io",
         },
-        // Near Mobile ships ML-DSA vaults that older selector/near-api-js cannot decode.
+        // MyNearWallet no longer accepts new app connections (sunset).
+        // Meteor is the recommended migration path and is listed first.
         modules: [
-          setupMyNearWallet({
-            walletUrl: "https://testnet.mynearwallet.com",
-          }),
           setupMeteorWallet(),
           setupHereWallet(),
-          setupNightly(),
           setupHotWallet(),
+          setupNightly(),
         ],
       });
     })();
@@ -105,7 +107,7 @@ export async function getModal(): Promise<WalletSelectorModal> {
     modal = setupModal(selector, {
       contractId: "skar.testnet",
       description:
-        "Connect the Guardia owner account (ed25519) to freeze, unfreeze, and manage agents.",
+        "Connect skar.testnet with Meteor Wallet (full-access ed25519) to freeze, unfreeze, and commit spend.",
     });
   }
   return modal;
@@ -162,8 +164,8 @@ export async function signFunctionCall(opts: {
     return undefined;
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
-    if (/redirect|popup|user rejected|cancelled/i.test(raw)) {
-      throw new Error("Redirected to sign — return to this tab after approving");
+    if (/redirect|popup|user rejected|cancelled|user closed/i.test(raw)) {
+      throw new Error("Sign request closed — approve in Meteor and try again");
     }
     clearPendingTx();
     throw new Error(rewriteWalletError(raw));
