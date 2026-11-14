@@ -4,6 +4,7 @@ export type Toast = {
   id: string;
   kind: ToastKind;
   message: string;
+  href?: string;
 };
 
 type Listener = (toasts: Toast[]) => void;
@@ -30,7 +31,7 @@ export function subscribeToasts(listener: Listener) {
   return () => listeners.delete(listener);
 }
 
-export function pushToast(kind: ToastKind, message: string) {
+export function pushToast(kind: ToastKind, message: string, href?: string) {
   if (isKeyTypeSchemaNoise(message)) {
     if (typeof console !== "undefined") {
       console.warn("[guardia] suppressed keyType schema noise", message.slice(0, 120));
@@ -38,10 +39,10 @@ export function pushToast(kind: ToastKind, message: string) {
     return;
   }
   const id = crypto.randomUUID();
-  toasts = [{ id, kind, message }, ...toasts].slice(0, 5);
+  toasts = [{ id, kind, message, href }, ...toasts].slice(0, 5);
   emit();
   window.setTimeout(() => {
     toasts = toasts.filter((t) => t.id !== id);
     emit();
-  }, 4500);
+  }, href ? 9000 : 4500);
 }

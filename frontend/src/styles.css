@@ -430,6 +430,7 @@ button.block { width: 100%; }
 .toast.ok { border-color: rgba(212, 255, 0, 0.4); color: var(--lime); }
 .toast.err { border-color: rgba(255, 77, 77, 0.45); color: #ffb4b4; }
 .toast.info { color: var(--text); }
+.toast a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
 .footer-note {
   margin-top: 12px;

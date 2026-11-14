@@ -8,6 +8,7 @@ import {
   saveKnownAgents,
 } from "./lib/config";
 import {
+  explorerTx,
   fetchContractEvents,
   formatEventTime,
   type ChainEvent,
@@ -332,7 +333,8 @@ export default function App() {
       });
       pushToast(
         "ok",
-        `${method} submitted${hash ? ` · ${hash.slice(0, 10)}…` : ""}`,
+        `${method} submitted${hash ? ` · ${hash.slice(0, 10)}… (view tx)` : ""}`,
+        hash ? explorerTx(hash) : undefined,
       );
       await new Promise((r) => setTimeout(r, 2000));
       await Promise.all([
