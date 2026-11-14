@@ -143,6 +143,7 @@ impl Contract {
     /// One-shot upgrade from the v1 state on `skar.testnet`.
     /// Pass every agent that should be kept; LookupMap cannot be scanned.
     #[init(ignore_state)]
+    #[private]
     pub fn migrate(agent_ids: Vec<AccountId>) -> Self {
         let old: StateV1 = env::state_read().expect("no v1 state to migrate");
         let mut contract = Self {
