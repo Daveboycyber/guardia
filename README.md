@@ -45,6 +45,8 @@ guardia/
 4. **Check / commit 20 NEAR** → BLOCK (over single limit).
 5. **Freeze** → **Check 1 NEAR** → BLOCK (`Agent is frozen`).
 
+Same path from the terminal, with tx links: `cd watcher && npm run chain-demo` (needs owner credentials).
+
 `check_transfer` is a **view** (preview only). **`commit_spend`** is what consumes the daily budget.
 
 ## Frontend
@@ -66,22 +68,18 @@ Vercel: set **Root Directory** to `frontend`.
 ```bash
 cd watcher
 npm install
-npm run demo          # offline policy mirror
+npm run demo          # offline policy mirror (single + daily caps, freeze)
+npm run watch         # continuous guard over every agent, auto-freeze on breach
+npm run live          # one-shot check_transfer + freeze on breach
+npm run chain-demo    # golden demo path on testnet, prints nearblocks tx links
 ```
 
-Live check + optional auto-freeze (needs `near` CLI + `~/.near-credentials/testnet/skar.testnet.json`):
+`watch` polls `get_policy` / `get_usage` for every agent in `list_agents()` and freezes when daily budget use crosses a
+threshold (default 90%), when spend velocity between ticks exceeds the agent's single-transfer limit, or when an optional
+probe amount is blocked. `GUARDIA_DRY_RUN=1` logs `would_freeze` without signing; `GUARDIA_LOG=json` emits structured
+logs. Signing uses `near` CLI + `~/.near-credentials/testnet/<owner>.json`; without credentials, freezes are skipped and logged.
 
-```bash
-GUARDIA_CONTRACT=skar.testnet \
-GUARDIA_AGENT=agent.skar.testnet \
-GUARDIA_OWNER=skar.testnet \
-GUARDIA_NEAR=20 \
-npm run live
-```
-
-`GUARDIA_AUTO_FREEZE=0` reports only. This is a **one-shot** process, not a long-running daemon.
-
-Details: [watcher/README.md](watcher/README.md).
+Details and all env vars: [watcher/README.md](watcher/README.md).
 
 ## Contract
 
@@ -120,8 +118,9 @@ cargo near deploy skar.testnet \
 
 - Contract: deployed testnet, unit tests in-repo
 - Dashboard: deployed, policy surface + probes + commit + freeze
-- Watcher: demo + live auto-freeze path
-- Gaps: watcher is not continuous; incident stream depends on indexer coverage
+- Watcher: continuous `watch` loop (budget threshold, velocity, probe rules), dry-run, JSON logs, one-shot `live`, scripted `chain-demo`
+- Explorer links: nearblocks testnet (the legacy `explorer.testnet.near.org` is retired)
+- Gaps: watcher runs as a process you keep alive (systemd / pm2 / container), not a hosted service; incident stream depends on Nearblocks coverage
 
 ## Hackathon submission
 

@@ -50,6 +50,32 @@ export async function viewCall<T>(
   return JSON.parse(text) as T;
 }
 
+export function explorerTx(hash: string): string {
+  return `https://testnet.nearblocks.io/txns/${hash}`;
+}
+
+export type PolicyView = [maxSingle: string, maxDaily: string, frozen: boolean];
+export type UsageView = [spentToday: string, remaining: string, epochDay: string];
+
+export const getPolicy = (contractId: string, agentId: string) =>
+  viewCall<PolicyView | null>(contractId, "get_policy", { agent_id: agentId });
+
+export const getUsage = (contractId: string, agentId: string) =>
+  viewCall<UsageView | null>(contractId, "get_usage", { agent_id: agentId });
+
+export const listAgents = (contractId: string) =>
+  viewCall<string[]>(contractId, "list_agents", {});
+
+export const checkTransferOnChain = (
+  contractId: string,
+  agentId: string,
+  amountYocto: bigint,
+) =>
+  viewCall<[boolean, string]>(contractId, "check_transfer", {
+    agent_id: agentId,
+    amount: amountYocto.toString(),
+  });
+
 export function defaultCredentialsPath(ownerId: string): string {
   return join(homedir(), ".near-credentials", "testnet", `${ownerId}.json`);
 }
@@ -66,7 +92,7 @@ export async function changeCallViaCli(
 ): Promise<string> {
   const jsonArgs = JSON.stringify(args);
   const { stdout, stderr } = await execFileAsync(
-    "near",
+    process.env.GUARDIA_NEAR_CLI ?? "near",
     [
       "contract",
       "call-function",
@@ -90,7 +116,12 @@ export async function changeCallViaCli(
       maxBuffer: 4 * 1024 * 1024,
       env: process.env,
     },
-  );
+  ).catch((err: NodeJS.ErrnoException & { stdout?: string; stderr?: string }) => {
+    if (err.code === "ENOENT") {
+      throw new Error("near CLI not found on PATH — install near-cli-rs or set GUARDIA_NEAR_CLI");
+    }
+    throw new Error(`${err.message}\n${err.stderr ?? ""}`.slice(-800));
+  });
   const out = `${stdout}\n${stderr}`;
   const txMatch =
     out.match(/Transaction ID:\s*(\S+)/i) ??
