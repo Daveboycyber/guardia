@@ -48,8 +48,8 @@ every payment, and the **watcher** freezes the agent if something looks wrong.
 
 ### 1. Owner: register an agent and set limits
 
-Open the dashboard and connect the owner wallet, then use **Agents → Register agent**. Changing limits is done with `update_policy` from the terminal:
-Terminal commands use [near-cli-rs](https://github.com/near/near-cli-rs):
+Open the dashboard and connect the owner wallet, then use **Agents → Register agent**. Limits are changed with `update_policy` from the terminal
+([near-cli-rs](https://github.com/near/near-cli-rs)):
 
 ```bash
 # register an agent (default policy: 10 NEAR single, 50 NEAR daily)
