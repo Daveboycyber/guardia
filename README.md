@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/guardia-logo.svg" alt="Guardia" width="360" />
+</p>
+
 # Guardia
 
 **Real-time policy engine for agent-to-agent money flows on NEAR.**

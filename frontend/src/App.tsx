@@ -412,14 +412,20 @@ export default function App() {
       <div className="toast-stack">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>
-            {t.message}
+            {t.href ? (
+              <a href={t.href} target="_blank" rel="noreferrer">
+                {t.message}
+              </a>
+            ) : (
+              t.message
+            )}
           </div>
         ))}
       </div>
 
       <aside className="rail">
         <div className="rail-brand">
-          <span className="mark" />
+          <img className="mark" src="/guardia-mark.svg" alt="" width={32} height={32} />
           <div>
             <strong>Guardia</strong>
             <span>Agent money defense</span>

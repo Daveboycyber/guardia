@@ -69,11 +69,11 @@ body {
 }
 
 .rail-brand .mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--lime);
-  box-shadow: 0 0 20px var(--lime), 0 0 4px #fff;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--border-strong), 0 0 18px rgba(212, 255, 0, 0.18);
 }
 
 .rail-brand strong {

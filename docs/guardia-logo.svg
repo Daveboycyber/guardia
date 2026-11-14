@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" role="img" aria-label="Guardia">
+  <rect width="360" height="96" rx="20" fill="#0b0b0b"/>
+  <g transform="translate(16 16)">
+    <path fill="#d4ff00" fill-rule="evenodd" d="M32 7 52 14v16c0 13.5-8.6 22.7-20 27C20.6 52.7 12 43.5 12 30V14L32 7Zm0 13a7 7 0 0 0-3.4 13.1L26.5 44h11l-2.1-10.9A7 7 0 0 0 32 20Z"/>
+  </g>
+  <text x="92" y="52" fill="#f6f6f2" font-family="'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif" font-size="32" font-weight="700" letter-spacing="6">GUARDIA</text>
+  <text x="93" y="74" fill="#8b8b83" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="12" letter-spacing="1.5">AGENT MONEY DEFENSE · NEAR</text>
+</svg>
