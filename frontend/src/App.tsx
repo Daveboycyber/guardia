@@ -18,9 +18,11 @@ import {
   formatNear,
   getPolicy,
   getUsage,
+  humanReason,
   isFrozen,
   listAgents,
   nearToYocto,
+  previewDecision,
   usagePercent,
   type PolicyView,
   type UsageView,
@@ -42,7 +44,7 @@ type SessionDecision = {
   id: string;
   at: string;
   allowed: boolean;
-  amount: number;
+  amount: string;
   agentId: string;
   reason: string;
 };
@@ -60,6 +62,31 @@ function nowStamp() {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+type IncidentFilter = "all" | "freeze" | "policy" | "spend";
+
+const EVENT_LABELS: Record<string, string> = {
+  freeze_agent: "Agent frozen",
+  unfreeze_agent: "Agent unfrozen",
+  update_policy: "Limits changed",
+  register_agent: "Agent registered",
+  commit_spend: "Spend recorded",
+};
+
+const FILTER_METHODS: Record<IncidentFilter, string[]> = {
+  all: ["freeze_agent", "unfreeze_agent", "update_policy", "register_agent", "commit_spend"],
+  freeze: ["freeze_agent", "unfreeze_agent"],
+  policy: ["update_policy", "register_agent"],
+  spend: ["commit_spend"],
+};
+
+function agoLabel(at: number | null, now: number) {
+  if (at == null) return "never";
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  return `${Math.round(s / 60)}m ago`;
 }
 
 function riskTone(amount: number, maxNear: number | null) {
@@ -95,6 +122,14 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [demoMode, setDemoMode] = useState(false);
   const [flowStep, setFlowStep] = useState(0);
+  const [lastSync, setLastSync] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [incidentFilter, setIncidentFilter] = useState<IncidentFilter>("all");
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => subscribeToasts(setToasts), []);
 
@@ -139,6 +174,7 @@ export default function App() {
         setPolicy(snap.policy);
         setFrozen(snap.frozen);
         setUsage(u);
+        setLastSync(Date.now());
         if (snap.policy) {
           const s = yoctoToNearNumber(snap.policy.maxSingle);
           const d = yoctoToNearNumber(snap.policy.maxDaily);
@@ -268,19 +304,62 @@ export default function App() {
   }, [decisions, chainEvents]);
 
   const incidents = useMemo(() => {
-    return chainEvents.filter((e) =>
-      ["freeze_agent", "unfreeze_agent", "update_policy", "register_agent"].includes(
-        e.method,
-      ),
-    );
-  }, [chainEvents]);
+    const methods = FILTER_METHODS[incidentFilter];
+    return chainEvents.filter((e) => methods.includes(e.method));
+  }, [chainEvents, incidentFilter]);
+
+  const preview = useMemo(
+    () => previewDecision(policy, usage, nearToYocto(customNear)),
+    [policy, usage, customNear],
+  );
+
+  const posture = useMemo(() => {
+    if (!policy) {
+      return {
+        level: "unknown" as const,
+        title: loading ? "Reading policy…" : "Agent not registered",
+        detail: loading
+          ? "Fetching limits and usage from the contract."
+          : `${activeAgent} has no policy on ${contractId}. Register it on the Agents page.`,
+        advice: [] as string[],
+      };
+    }
+    const single = formatNear(policy.maxSingle);
+    const left = usage ? formatNear(usage.remaining) : formatNear(policy.maxDaily);
+    const recentBlocks = decisions.slice(0, 5).filter((d) => !d.allowed).length;
+    if (frozen) {
+      return {
+        level: "frozen" as const,
+        title: "Frozen — all spending blocked",
+        detail: `${activeAgent} cannot spend until the owner unfreezes it.`,
+        advice: [
+          "Review the Incidents page to see what triggered the freeze.",
+          "Unfreeze only after the cause is fixed.",
+        ],
+      };
+    }
+    const advice: string[] = [];
+    if (budgetPct >= 80) advice.push("Daily budget almost used up — consider freezing until tomorrow.");
+    if (recentBlocks >= 2) advice.push(`${recentBlocks} of the last 5 probes were blocked — the agent may be misbehaving.`);
+    if ((yoctoToNearNumber(policy.maxSingle) ?? 0) * 2 > (yoctoToNearNumber(policy.maxDaily) ?? 0))
+      advice.push("Single limit is over half the daily budget — two payments could drain it.");
+    const level = budgetPct >= 80 || recentBlocks >= 2 ? ("risk" as const) : budgetPct >= 50 || advice.length ? ("watch" as const) : ("secure" as const);
+    const title =
+      level === "secure" ? "Protected" : level === "watch" ? "Protected — keep an eye on it" : "At risk";
+    return {
+      level,
+      title,
+      detail: `${activeAgent} can spend up to ${single} per payment, with ${left} left today (${budgetPct}% of budget used).`,
+      advice,
+    };
+  }, [policy, usage, frozen, loading, decisions, budgetPct, activeAgent, contractId]);
 
   async function connectWallet() {
     const modal = await getModal();
     modal.show();
   }
 
-  async function runCheck(amount: number) {
+  async function runCheck(amount: number | string) {
     setBusy(true);
     try {
       const result = await checkTransfer(
@@ -294,9 +373,9 @@ export default function App() {
             id: crypto.randomUUID(),
             at: nowStamp(),
             allowed: result.allowed,
-            amount,
+            amount: String(amount),
             agentId: activeAgent,
-            reason: result.reason,
+            reason: humanReason(result.reason),
           },
           ...d,
         ].slice(0, 40),
@@ -305,7 +384,7 @@ export default function App() {
         result.allowed ? "ok" : "err",
         result.allowed
           ? `ALLOW ${amount} NEAR`
-          : `BLOCK ${amount} NEAR — ${result.reason}`,
+          : `BLOCK ${amount} NEAR — ${humanReason(result.reason)}`,
       );
       await refresh();
       return result;
@@ -489,14 +568,14 @@ export default function App() {
                 >
                   {demoMode ? "Hide demo" : "Demo mode"}
                 </button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={busy}
-                  onClick={() => void refresh()}
+                <span
+                  className={`status-badge ${frozen ? "frozen" : policy ? "live" : "idle"}`}
+                  title={`Last synced ${agoLabel(lastSync, now)}`}
                 >
-                  {loading ? "Syncing" : frozen ? "Agent frozen" : "Agent live"}
-                </button>
+                  <span className="dot" />
+                  {loading && !policy ? "Syncing" : frozen ? "Frozen" : policy ? "Active" : "Unregistered"}
+                  <small>· synced {agoLabel(lastSync, now)}</small>
+                </span>
               </div>
             </header>
 
@@ -543,6 +622,24 @@ export default function App() {
                 </ol>
               </section>
             )}
+
+            <section className={`posture ${posture.level}`}>
+              <div className="posture-icon" aria-hidden="true">
+                <img src="/guardia-mark.svg" alt="" width={40} height={40} />
+              </div>
+              <div className="posture-body">
+                <span className="posture-kicker">Guardian verdict</span>
+                <h2>{posture.title}</h2>
+                <p>{posture.detail}</p>
+                {posture.advice.length > 0 && (
+                  <ul>
+                    {posture.advice.map((a) => (
+                      <li key={a}>{a}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
 
             <div className="workspace">
               <section className="panel">
@@ -642,7 +739,7 @@ export default function App() {
                     type="button"
                     className="btn-ghost"
                     disabled={busy}
-                    onClick={() => void runCheck(Number(customNear) || 0)}
+                    onClick={() => void runCheck(customNear || "0")}
                   >
                     Check
                   </button>
@@ -653,13 +750,19 @@ export default function App() {
                     onClick={() =>
                       void ownerCall("commit_spend", {
                         agent_id: activeAgent,
-                        amount: nearToYocto(Number(customNear) || 0),
+                        amount: nearToYocto(customNear || "0"),
                       })
                     }
                   >
                     Commit spend
                   </button>
                 </div>
+                {preview && Number(customNear) > 0 && (
+                  <p className={`live-preview ${preview.allowed ? "ok" : "bad"}`}>
+                    <strong>{preview.allowed ? "Would allow" : "Would block"}</strong>{" "}
+                    {customNear} NEAR · {preview.reason}
+                  </p>
+                )}
                 <div className="decision-list">
                   {decisions.length === 0 ? (
                     <p className="empty">No session decisions yet — run a probe.</p>
@@ -727,26 +830,45 @@ export default function App() {
                   className="btn-primary"
                   disabled={busy || !registerId.trim()}
                   onClick={() =>
-                    void ownerCall("register_agent", {
-                      agent_id: registerId.trim(),
-                      max_single: nearToYocto(Number(limitSingle) || 10),
-                      max_daily: nearToYocto(Number(limitDaily) || 50),
-                    })
+                    void ownerCall("register_agent", { agent_id: registerId.trim() })
                   }
                 >
                   Register
                 </button>
               </div>
+              <p className="panel-copy">New agents start at 10 NEAR per payment and 50 NEAR per day.</p>
+            </div>
+            <div className="form-block">
+              <h3>
+                Limits for <code>{activeAgent}</code>
+              </h3>
               <div className="dual-input">
                 <label>
                   Max single (NEAR)
-                  <input value={limitSingle} onChange={(e) => setLimitSingle(e.target.value)} />
+                  <input value={limitSingle} inputMode="decimal" onChange={(e) => setLimitSingle(e.target.value)} />
                 </label>
                 <label>
                   Max daily (NEAR)
-                  <input value={limitDaily} onChange={(e) => setLimitDaily(e.target.value)} />
+                  <input value={limitDaily} inputMode="decimal" onChange={(e) => setLimitDaily(e.target.value)} />
                 </label>
               </div>
+              {Number(limitSingle) > Number(limitDaily) && (
+                <p className="live-preview bad">Single limit is higher than the daily budget, so the daily budget will apply first.</p>
+              )}
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy || !policy || !(Number(limitSingle) > 0) || !(Number(limitDaily) > 0)}
+                onClick={() =>
+                  void ownerCall("update_policy", {
+                    agent_id: activeAgent,
+                    max_single_transfer: nearToYocto(limitSingle),
+                    max_daily_volume: nearToYocto(limitDaily),
+                  })
+                }
+              >
+                Update limits
+              </button>
             </div>
           </section>
         )}
@@ -754,14 +876,26 @@ export default function App() {
         {page === "incidents" && (
           <section className="panel">
             <h2 className="page-title">Incidents / chain events</h2>
+            <div className="filter-row">
+              {(["all", "freeze", "policy", "spend"] as IncidentFilter[]).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`chip ${incidentFilter === f ? "active" : ""}`}
+                  onClick={() => setIncidentFilter(f)}
+                >
+                  {{ all: "All", freeze: "Freezes", policy: "Policy", spend: "Spend" }[f]}
+                </button>
+              ))}
+            </div>
             <div className="event-list">
               {incidents.length === 0 ? (
-                <p className="empty">No freeze/policy events indexed yet.</p>
+                <p className="empty">No matching events indexed yet.</p>
               ) : (
                 incidents.map((e) => (
-                  <div key={e.id} className="event-row">
+                  <div key={e.id} className={`event-row ev-${e.method}`}>
                     <span>{formatEventTime(e.at)}</span>
-                    <strong>{e.method}</strong>
+                    <strong>{EVENT_LABELS[e.method] ?? e.method}</strong>
                     <span>{e.summary}</span>
                     <a className="chain-link" href={e.explorerUrl} target="_blank" rel="noreferrer">
                       {e.txHash.slice(0, 10)}…

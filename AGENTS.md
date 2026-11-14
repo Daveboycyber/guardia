@@ -70,6 +70,9 @@ cd watcher && npm install && npm run typecheck && npm run demo
   `nodeUrl`. Do not point the browser at public RPC directly, as it gets rate-limited.
 - Background polling (~20s) must not blank the Policy Surface. Show skeletons on first load only.
 - Probe/Check uses `check_transfer` only; Commit uses `commit_spend` and needs the owner wallet.
+- `previewDecision()` in `src/lib/near.ts` mirrors `Policy::evaluate` (frozen → single limit → daily budget). If the
+  contract rules change, change it too. Convert amounts with `nearToYocto()`, which keeps decimals.
+- Local `npm run dev` / `npm run preview` proxy `/api/near-rpc` and `/api/nearblocks` like `vercel.json` does.
 - Explorer links use `https://testnet.nearblocks.io` (`explorerTx()`). `explorer.testnet.near.org` is retired.
 - Keep the visual style: charcoal background, lime `--lime: #d4ff00` accent, IBM Plex Sans/Mono. Logo lives at
   `frontend/public/guardia-mark.svg`.
