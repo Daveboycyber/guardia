@@ -79,7 +79,7 @@ export async function getSelector(): Promise<WalletSelector> {
           networkId: NETWORK_ID,
           nodeUrl,
           helperUrl: "https://helper.testnet.near.org",
-          explorerUrl: "https://explorer.testnet.near.org",
+          explorerUrl: "https://testnet.nearblocks.io",
           indexerUrl: "https://api-testnet.nearblocks.io",
         },
         // Near Mobile ships ML-DSA vaults that older selector/near-api-js cannot decode.

@@ -95,9 +95,49 @@ export async function checkTransfer(
   return { allowed, reason };
 }
 
+/** Decimal-safe NEAR → yocto (1 NEAR = 10^24). "0.5" → 5 × 10^23. Invalid input → "0". */
 export function nearToYocto(near: number | string): string {
-  const n = typeof near === "string" ? Number(near) : near;
-  return (BigInt(Math.floor(n)) * ONE_NEAR).toString();
+  const raw = (typeof near === "number" ? near.toString() : near).trim();
+  if (!/^\d*\.?\d*$/.test(raw) || raw === "" || raw === ".") return "0";
+  const [whole = "0", frac = ""] = raw.split(".");
+  const fracPadded = (frac + "0".repeat(24)).slice(0, 24);
+  return (BigInt(whole || "0") * ONE_NEAR + BigInt(fracPadded)).toString();
+}
+
+/** Mirror of the contract's Policy::evaluate, for instant "what would happen" previews. */
+export function previewDecision(
+  policy: PolicyView,
+  usage: UsageView,
+  amountYocto: string,
+): { allowed: boolean; reason: string } | null {
+  if (!policy) return null;
+  const amount = BigInt(amountYocto);
+  if (policy.frozen) return { allowed: false, reason: "Agent is frozen" };
+  if (amount > BigInt(policy.maxSingle)) {
+    return {
+      allowed: false,
+      reason: `Over the ${formatNear(policy.maxSingle)} single-payment limit`,
+    };
+  }
+  const spent = BigInt(usage?.spent ?? "0");
+  if (spent + amount > BigInt(policy.maxDaily)) {
+    return {
+      allowed: false,
+      reason: `Would pass the ${formatNear(policy.maxDaily)} daily budget (${formatNear(spent.toString())} spent)`,
+    };
+  }
+  return {
+    allowed: true,
+    reason: `Leaves ${formatNear((BigInt(policy.maxDaily) - spent - amount).toString())} for today`,
+  };
+}
+
+/** Rewrites raw yocto numbers in contract reasons ("Amount 2000…000 exceeds …") as NEAR. */
+export function humanReason(reason: string): string {
+  return reason
+    .replace(/\d{19,}/g, (n) => formatNear(n))
+    .replace(/max_single_transfer/g, "single-payment limit")
+    .replace(/max_daily_volume/g, "daily budget");
 }
 
 export function formatNear(yocto: string): string {

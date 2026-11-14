@@ -26,8 +26,8 @@ type NearblocksTxn = {
   outcomes_agg?: { transaction_status?: string };
 };
 
-function explorerTx(hash: string) {
-  return `https://explorer.testnet.near.org/transactions/${hash}`;
+export function explorerTx(hash: string) {
+  return `https://testnet.nearblocks.io/txns/${hash}`;
 }
 
 function parseEventJson(logs: string[] | undefined): string | undefined {
