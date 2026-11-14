@@ -21,6 +21,21 @@ Guardia is:
 **Primary track:** AI Security & Defense  
 **Also fits:** Agent Economy, Autonomous Business
 
+## Use cases
+
+Anywhere software spends money on someone's behalf, Guardia puts a ceiling and a kill switch on it.
+
+| Use case | How Guardia helps |
+|----------|-------------------|
+| **AI assistants that pay for things** | A personal agent that books travel, buys API credits or tips creators gets a per-payment cap and a daily budget, so one bad prompt can't empty the wallet. |
+| **Agent-to-agent marketplaces** | Agents paying other agents for data, compute or tasks are capped per call and per day, and are frozen automatically if they start paying unusually fast. |
+| **Trading and DeFi bots** | A strategy bot can rebalance within limits; a bug or exploited strategy that tries to move everything at once is blocked and frozen. |
+| **DAO and treasury operators** | A DAO delegates routine payouts (grants, bounties, contributor pay) to an agent with a budget, instead of handing out a multisig key. |
+| **Businesses running agent fleets** | One owner registers many agents (support refunds, procurement, ad spend), each with its own limits, and watches them from one dashboard. |
+| **Pay-per-use APIs and subscriptions** | Usage-based payments to services stay inside a daily budget, even if the agent gets stuck in a loop. |
+| **Prompt-injection defense** | When an agent reads a malicious web page or message telling it to "send everything to X", Guardia blocks the oversized payment and the watcher freezes the agent. |
+| **Incident response** | Security teams get one switch to stop an agent's spending right away, and an on-chain record of what it tried to do. |
+
 ## Live targets (testnet)
 
 | Item | Value |
@@ -216,6 +231,29 @@ cargo near deploy skar.testnet \
 - Watcher: continuous `watch` loop (budget threshold, velocity, probe rules), dry-run, JSON logs, one-shot `live`, scripted `chain-demo`
 - Explorer links: nearblocks testnet (the legacy `explorer.testnet.near.org` is retired)
 - Gaps: watcher runs as a process you keep alive (systemd / pm2 / container), not a hosted service; incident stream depends on Nearblocks coverage
+
+## Roadmap
+
+**Next**
+- **Vault mode:** Guardia holds the agent's funds and makes the transfer itself, and the agent only gets a function-call
+  key scoped to the Guardia contract. This turns limits from advisory into enforced.
+- **Recipient allowlists:** per-agent lists of accounts the agent may pay, to stop "pay the attacker" injections.
+- **Human approval above a threshold:** large payments wait in a queue until the owner approves them in the dashboard.
+- **Hosted watcher:** always-on watcher with a heartbeat shown in the dashboard and alerts (Telegram, Slack, email).
+
+**Then**
+- **Agent SDK and MCP server:** a `guardedPay()` TypeScript/Python SDK and an MCP server so any AI agent framework
+  (NEAR AI, Claude, LangChain and others) gets a payment tool that can't break policy.
+- **Fungible tokens:** limits for USDC and other NEP-141 tokens, not just NEAR.
+- **Smarter rules:** time-of-day windows, per-recipient caps, spend velocity and anomaly scoring on chain.
+- **Multi-owner policies:** a DAO or multisig as owner, so changing limits or unfreezing needs more than one key.
+
+**Later**
+- **Multichain spending:** apply the same policy to payments an agent makes on other chains through NEAR Chain
+  Signatures.
+- **TEE-attested agents:** only agents running verified code in a trusted execution environment can spend, and
+  Guardia checks the attestation.
+- **Mainnet launch** after an independent security audit.
 
 ## Security
 
