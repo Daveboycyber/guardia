@@ -416,14 +416,19 @@ mod tests {
     fn daily_cap_blocks_after_commits() {
         let mut contract = setup();
         set_predecessor(owner());
-        let (ok, reason) = contract.commit_spend(agent(), yocto(30 * ONE_NEAR));
+        // 4 x 10 + 5 = 45 NEAR, each commit within the 10 NEAR single limit
+        for _ in 0..4 {
+            let (ok, reason) = contract.commit_spend(agent(), yocto(10 * ONE_NEAR));
+            assert!(ok, "{reason}");
+        }
+        let (ok, reason) = contract.commit_spend(agent(), yocto(5 * ONE_NEAR));
         assert!(ok, "{reason}");
-        let (ok, reason) = contract.commit_spend(agent(), yocto(25 * ONE_NEAR));
+        let (ok, reason) = contract.commit_spend(agent(), yocto(10 * ONE_NEAR));
         assert!(!ok);
-        assert!(reason.contains("max_daily_volume"));
-        let (preview_ok, _) = contract.check_transfer(agent(), yocto(25 * ONE_NEAR));
+        assert!(reason.contains("max_daily_volume"), "{reason}");
+        let (preview_ok, _) = contract.check_transfer(agent(), yocto(10 * ONE_NEAR));
         assert!(!preview_ok);
-        let (still_ok, _) = contract.check_transfer(agent(), yocto(10 * ONE_NEAR));
+        let (still_ok, _) = contract.check_transfer(agent(), yocto(4 * ONE_NEAR));
         assert!(still_ok);
     }
 
@@ -431,8 +436,10 @@ mod tests {
     fn spend_resets_on_the_next_day() {
         let mut contract = setup();
         set_predecessor(owner());
-        let (ok, _) = contract.commit_spend(agent(), yocto(40 * ONE_NEAR));
-        assert!(ok);
+        for _ in 0..4 {
+            let (ok, reason) = contract.commit_spend(agent(), yocto(10 * ONE_NEAR));
+            assert!(ok, "{reason}");
+        }
 
         let mut builder = VMContextBuilder::new();
         builder
@@ -441,10 +448,10 @@ mod tests {
             .block_timestamp(NS_PER_DAY * 4);
         testing_env!(builder.build());
 
-        let (ok, reason) = contract.commit_spend(agent(), yocto(40 * ONE_NEAR));
+        let (ok, reason) = contract.commit_spend(agent(), yocto(10 * ONE_NEAR));
         assert!(ok, "{reason}");
         let usage = contract.get_usage(agent()).unwrap();
-        assert_eq!(usage.0, yocto(40 * ONE_NEAR));
+        assert_eq!(usage.0, yocto(10 * ONE_NEAR));
     }
 
     #[test]
